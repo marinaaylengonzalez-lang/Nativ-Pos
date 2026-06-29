@@ -77,6 +77,7 @@ function render(){
   let body = '';
   if (U.mode === 'login') body = renderLogin();
   else if (U.mode === 'signup') body = renderSignup();
+  else if (U.mode === 'confirm-email') body = renderConfirmEmail();
   else if (U.mode === 'onboarding') body = renderOnboarding();
 
   return header + `<div style="flex:1;padding:0 24px 32px" class="card-anim">${body}</div>`;
@@ -111,6 +112,25 @@ function renderSignup(){
   `;
 }
 
+function renderConfirmEmail(){
+  return `
+    <div style="text-align:center;padding:8px 0 0">
+      <div style="width:72px;height:72px;border-radius:50%;background:var(--brand-soft);display:flex;align-items:center;justify-content:center;margin:0 auto 18px">
+        <i class="ti ti-mail-opened" style="font-size:34px;color:var(--brand)"></i>
+      </div>
+      <h2 style="font-size:20px;font-weight:800;margin-bottom:8px">Confirmá tu email</h2>
+      <p style="font-size:14px;color:var(--ink-700);line-height:1.5;margin-bottom:4px">Te enviamos un link de confirmación a:</p>
+      <p style="font-size:15px;font-weight:700;color:var(--ink-900);margin-bottom:20px">${U.email}</p>
+      <p style="font-size:13px;color:var(--ink-500);line-height:1.5;margin-bottom:24px">Tocá el link del email para activar tu cuenta. Después volvé acá e ingresá normalmente.</p>
+    </div>
+    ${U.error ? `<div class="err"><i class="ti ti-alert-circle"></i>${U.error}</div>` : ''}
+    <button class="btn-primary" onclick="doLogin()" ${U.loading?'disabled':''}>
+      ${U.loading ? '<span class="spinner"></span>' : '<i class="ti ti-login-2"></i> Ya confirmé, ingresar'}
+    </button>
+    <button class="btn-ghost" onclick="U.mode='login';U.error='';R()">Volver al inicio</button>
+  `;
+}
+
 function renderOnboarding(){
   const rubrosHTML = RUBROS.map(([id,label,icon]) => `
     <div onclick="U.negocioRubro='${id}';R()" style="display:flex;align-items:center;gap:11px;padding:13px;border-radius:var(--r-md);border:2px solid ${U.negocioRubro===id?'var(--brand)':'var(--ink-100)'};background:${U.negocioRubro===id?'var(--brand-soft)':'#fff'};cursor:pointer;margin-bottom:8px">
@@ -142,7 +162,16 @@ window.doLogin = async function(){
   const { data, error } = await sb.auth.signInWithPassword({ email, password });
   U.loading = false;
   if(error){
-    U.error = error.message.includes('Invalid login') ? 'Email o contraseña incorrectos.' : error.message;
+    if(error.message.includes('Invalid login')){
+      U.error = 'Email o contraseña incorrectos.';
+    } else if(error.message.toLowerCase().includes('email not confirmed')){
+      U.mode = 'confirm-email';
+      U.loading = false;
+      R();
+      return;
+    } else {
+      U.error = error.message;
+    }
     R();
     return;
   }
@@ -157,7 +186,7 @@ window.doSignup = async function(){
   if(password.length < 6){ U.error='La contraseña debe tener al menos 6 caracteres.'; R(); return; }
   if(password !== password2){ U.error='Las contraseñas no coinciden.'; R(); return; }
 
-  U.loading = true; U.error=''; R();
+  U.loading = true; U.error=''; U.email = email; R();
   const { data, error } = await sb.auth.signUp({ email, password });
   U.loading = false;
 
@@ -166,7 +195,16 @@ window.doSignup = async function(){
     R();
     return;
   }
-  // Pasa a completar datos del negocio
+
+  // Si Supabase no devuelve una sesión activa, significa que requiere
+  // confirmación de email antes de poder usar la cuenta.
+  if(!data?.session){
+    U.mode = 'confirm-email';
+    R();
+    return;
+  }
+
+  // Si ya hay sesión (confirmación de email desactivada), seguimos directo
   U.mode = 'onboarding';
   R();
 };
@@ -178,14 +216,32 @@ window.doOnboarding = async function(){
 
   U.loading = true; U.error=''; R();
 
-  const { data: userData } = await sb.auth.getUser();
+  // Diagnóstico: confirmamos que hay sesión activa antes de insertar
+  const { data: sessionData, error: sessionError } = await sb.auth.getSession();
+  console.log('[Nativ POS] sesión actual:', sessionData?.session);
+  console.log('[Nativ POS] sessionError:', sessionError);
+
+  const { data: userData, error: userError } = await sb.auth.getUser();
+  console.log('[Nativ POS] userData:', userData);
+  console.log('[Nativ POS] userError:', userError);
+
   const ownerId = userData?.user?.id;
+  console.log('[Nativ POS] ownerId a insertar:', ownerId);
+
+  if(!ownerId){
+    U.loading = false;
+    U.error = 'No hay sesión activa. Volvé a ingresar e intentá de nuevo.';
+    R();
+    return;
+  }
 
   const { data, error } = await sb.from('negocios').insert({
     owner_id: ownerId,
     nombre: nombre,
     rubro: U.negocioRubro,
   }).select().single();
+
+  console.log('[Nativ POS] resultado insert:', { data, error });
 
   U.loading = false;
   if(error){
