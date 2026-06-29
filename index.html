@@ -124,6 +124,12 @@ async function boot(){
   S.mesas = mesas;
   S.turno = turno;
 
+  // Si todavía no hay empleados con PIN creados, el dueño entra directo
+  // (es el único que puede operar, no tiene sentido pedirle un PIN a sí mismo).
+  if(empleados.length === 0){
+    S.empleadoActivo = { id: null, nombre: 'Dueño', rol: 'dueno' };
+  }
+
   S.loading = false;
   R();
 }
