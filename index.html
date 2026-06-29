@@ -1,0 +1,1027 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#1a3fa0">
+<title>Nativ POS</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+:root{
+  --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:24px;--sp-6:32px;
+  --r-sm:12px;--r-md:18px;--r-lg:24px;--r-pill:99px;
+  --ink-900:#14171f;--ink-700:#4b5160;--ink-500:#969cab;--ink-300:#d6d9e1;--ink-100:#f2f3f6;--ink-0:#fff;
+  --brand:#1a3fa0;--brand-deep:#0d2570;--brand-soft:#eaeefb;
+  --money:#0f9d58;--money-deep:#0a7a43;--money-soft:#e6f7ee;
+  --danger:#e0293f;--danger-soft:#fdeaed;
+  --warn:#d97a06;--warn-soft:#fef3e2;
+  --shadow-card:0 1px 2px rgba(20,23,31,.04),0 2px 8px rgba(20,23,31,.06);
+  --shadow-float:0 8px 24px rgba(20,23,31,.12),0 2px 6px rgba(20,23,31,.06);
+  --shadow-cta:0 10px 24px rgba(15,157,88,.35);
+  --ease:cubic-bezier(.22,.85,.32,1);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Roboto,sans-serif;background:var(--ink-100);color:var(--ink-900);-webkit-font-smoothing:antialiased;overflow:hidden}
+#app{max-width:430px;margin:0 auto;height:100vh;background:var(--ink-100);position:relative;display:flex;flex-direction:column;overflow:hidden}
+input,select,textarea{border:1.5px solid var(--ink-300);border-radius:var(--r-sm);padding:12px 14px;width:100%;font-size:15px;background:#fff;color:var(--ink-900);outline:none;transition:border-color .15s;font-family:inherit}
+input:focus,select:focus,textarea:focus{border-color:var(--brand)}
+button{font-family:inherit;cursor:pointer}
+.lbl{font-size:13px;color:var(--ink-700);font-weight:700;display:block;margin-bottom:6px}
+.field{margin-bottom:14px}
+.btn-primary{width:100%;padding:16px;background:var(--brand);color:#fff;border:none;border-radius:var(--r-md);font-size:16px;font-weight:800;box-shadow:0 10px 24px rgba(26,63,160,.3);display:flex;align-items:center;justify-content:center;gap:8px;transition:transform .1s var(--ease)}
+.btn-primary:active{transform:scale(.98)}
+.btn-primary:disabled{opacity:.4;box-shadow:none}
+.btn-money{width:100%;padding:16px;background:var(--money);color:#fff;border:none;border-radius:var(--r-md);font-size:16px;font-weight:800;box-shadow:var(--shadow-cta);display:flex;align-items:center;justify-content:center;gap:8px}
+.btn-ghost{width:100%;padding:12px;background:none;border:none;color:var(--brand);font-size:14px;font-weight:700}
+.btn-danger-ghost{width:100%;padding:12px;background:none;border:1.5px solid var(--danger);color:var(--danger);border-radius:var(--r-md);font-size:14px;font-weight:700}
+.card{background:var(--ink-0);border-radius:var(--r-md);box-shadow:var(--shadow-card)}
+.err{background:var(--danger-soft);color:var(--danger);border-radius:var(--r-sm);padding:11px 13px;font-size:13px;font-weight:600;margin-bottom:12px;display:flex;align-items:center;gap:7px}
+.spinner{width:16px;height:16px;border:2.5px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;display:inline-block}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes pop{from{transform:scale(0)}to{transform:scale(1)}}
+.fade{animation:fadeIn .2s var(--ease)}
+.center-screen{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px}
+/* Scrollbars ocultos en mobile look */
+::-webkit-scrollbar{display:none}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+
+
+
+
+
+
+
+<script type="module">
+import * as DB from './src/db.js';
+
+const A = '#1a3fa0', R2 = '#e0293f', MONEY = '#0f9d58';
+const LOGO_ICO = `<svg width="32" height="32" viewBox="0 0 100 100"><rect width="100" height="100" rx="20" fill="#1a3fa0"/><polygon points="18,80 18,20 30,20 58,56 58,20 72,20 72,80 58,80 30,44 30,80" fill="white"/><polygon points="18,20 30,20 44,42 30,42" fill="#e0293f"/></svg>`;
+const LOGO_BIG = `<svg width="64" height="64" viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="#1a3fa0"/><polygon points="18,80 18,20 30,20 58,56 58,20 72,20 72,80 58,80 30,44 30,80" fill="white"/><polygon points="18,20 30,20 44,42 30,42" fill="#e0293f"/></svg>`;
+
+// ── ESTADO GLOBAL ────────────────────────────────────────────
+let S = window.S = {
+  loading: true,
+  error: '',
+  negocio: null,
+  empleados: [],
+  empleadoActivo: null,   // {id,nombre,rol} — null = dueño operando directo
+  turno: null,
+  productos: [],
+  categorias: [],
+  clientes: [],
+  mesas: [],
+
+  tab: 'vender',           // vender | mesas | caja | mas
+  masScreen: null,         // null = menú "más" | 'productos' | 'clientes' | 'reportes' | 'finanzas' | 'config' | 'empleados'
+
+  // PIN
+  pinSel: null, pinBuffer: '', pinError: '',
+
+  // Vender
+  cart: {}, fcat: 'Todos', fq: '', sheet: null,
+  disc: 0, nota: '',
+  pm: 'efectivo', cstep: 'metodo', cash: '',
+  selCliente: null, csq: '',
+
+  // Mesas
+  mesaSel: null, mesaView: 'mapa', mesaZona: 'Salón', mesaAddView: false, mesaFq: '',
+  mesaCobrarSheet: false, mesaPM: 'efectivo', mesaCash: '',
+};
+
+function R(){ window.S = S; document.getElementById('app').innerHTML = render(); afterRender(); }
+window.R = R;
+
+const f$ = n => '$' + (Math.round(n) || 0).toLocaleString('es-AR');
+
+// ── BOOT ──────────────────────────────────────────────────────
+async function boot(){
+  const user = await DB.getSessionUser();
+  if(!user){ window.location.href = './auth.html'; return; }
+
+  const negocio = await DB.getMiNegocio();
+  if(!negocio){ window.location.href = './auth.html'; return; }
+  S.negocio = negocio;
+
+  const [empleados, productos, categorias, clientes, mesas, turno] = await Promise.all([
+    DB.listarEmpleados(negocio.id),
+    DB.listarProductos(negocio.id),
+    DB.listarCategorias(negocio.id),
+    DB.listarClientes(negocio.id),
+    DB.listarMesas(negocio.id),
+    DB.turnoAbierto(negocio.id),
+  ]);
+  S.empleados = empleados;
+  S.productos = productos;
+  S.categorias = categorias.length ? categorias : [{ id: null, nombre: 'General', color: '#B5D4F4' }];
+  S.clientes = clientes;
+  S.mesas = mesas;
+  S.turno = turno;
+
+  S.loading = false;
+  R();
+}
+
+boot();
+
+// ════════════════════════════════════════════════════════════
+// RENDER PRINCIPAL
+// ════════════════════════════════════════════════════════════
+function render(){
+  if(S.loading) return renderLoading();
+  if(S.empleados.length > 0 && !S.empleadoActivo) return renderPIN();
+  if(!S.turno) return renderAbrirTurno();
+
+  let body = '';
+  if(S.tab === 'vender') body = renderVender();
+  else if(S.tab === 'mesas') body = renderMesas();
+  else if(S.tab === 'caja') body = renderCaja();
+  else if(S.tab === 'mas') body = renderMas();
+
+  return `<div style="display:flex;flex-direction:column;height:100%">${body}${renderTabBar()}</div>`;
+}
+
+function renderLoading(){
+  return `<div class="center-screen">${LOGO_BIG}<div style="margin-top:16px;font-size:14px;color:var(--ink-500);font-weight:700">Cargando Nativ POS...</div></div>`;
+}
+
+// ════════════════════════════════════════════════════════════
+// PIN DE EMPLEADOS
+// ════════════════════════════════════════════════════════════
+function renderPIN(){
+  const sel = S.pinSel;
+  if(!sel){
+    return `<div class="center-screen fade" style="justify-content:flex-start;padding-top:60px">
+      ${LOGO_BIG}
+      <div style="font-size:18px;font-weight:800;margin:16px 0 4px">¿Quién está usando la caja?</div>
+      <div style="font-size:13px;color:var(--ink-500);margin-bottom:24px">${S.negocio.nombre}</div>
+      <div style="width:100%;display:flex;flex-direction:column;gap:10px">
+        ${S.empleados.map(e => `
+          <div onclick="selectPinUser('${e.id}')" class="card" style="display:flex;align-items:center;gap:13px;padding:14px 16px;cursor:pointer">
+            <div style="width:44px;height:44px;border-radius:50%;background:var(--brand-soft);display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:800;color:var(--brand)">${e.nombre.charAt(0).toUpperCase()}</div>
+            <div><div style="font-size:15px;font-weight:700">${e.nombre}</div><div style="font-size:12px;color:var(--ink-500);font-weight:600">${rolLabel(e.rol)}</div></div>
+          </div>`).join('')}
+        <div onclick="selectPinUser('owner')" class="card" style="display:flex;align-items:center;gap:13px;padding:14px 16px;cursor:pointer;border:1.5px dashed var(--ink-300);box-shadow:none">
+          <div style="width:44px;height:44px;border-radius:50%;background:var(--ink-100);display:flex;align-items:center;justify-content:center;font-size:19px;color:var(--ink-500)"><i class="ti ti-crown"></i></div>
+          <div><div style="font-size:15px;font-weight:700">Soy el dueño</div><div style="font-size:12px;color:var(--ink-500);font-weight:600">Acceso completo</div></div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  if(sel === 'owner'){
+    // El dueño entra directo sin PIN (ya tiene su sesión de Supabase Auth)
+    S.empleadoActivo = { id: null, nombre: 'Dueño', rol: 'dueno' };
+    R();
+    return renderLoading();
+  }
+
+  const emp = S.empleados.find(e => e.id === sel);
+  return `<div class="center-screen fade">
+    <div style="width:56px;height:56px;border-radius:50%;background:var(--brand-soft);display:flex;align-items:center;justify-content:center;font-size:21px;font-weight:800;color:var(--brand);margin-bottom:12px">${emp?.nombre.charAt(0).toUpperCase()}</div>
+    <div style="font-size:16px;font-weight:800;margin-bottom:4px">${emp?.nombre}</div>
+    <div style="font-size:12px;color:var(--ink-500);margin-bottom:18px">Ingresá tu PIN</div>
+    ${S.pinError ? `<div class="err"><i class="ti ti-alert-circle"></i>${S.pinError}</div>` : ''}
+    <div style="display:flex;gap:11px;margin-bottom:22px">
+      ${[0,1,2,3].map(i => `<div style="width:15px;height:15px;border-radius:50%;background:${i < S.pinBuffer.length ? A : 'var(--ink-300)'}"></div>`).join('')}
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%;max-width:260px">
+      ${[1,2,3,4,5,6,7,8,9].map(d => `<button onclick="pinPress('${d}')" style="height:58px;border-radius:16px;border:1.5px solid var(--ink-100);background:var(--ink-0);font-size:22px;font-weight:700;box-shadow:var(--shadow-card)">${d}</button>`).join('')}
+      <div></div>
+      <button onclick="pinPress('0')" style="height:58px;border-radius:16px;border:1.5px solid var(--ink-100);background:var(--ink-0);font-size:22px;font-weight:700;box-shadow:var(--shadow-card)">0</button>
+      <button onclick="pinDelete()" style="height:58px;border-radius:16px;border:none;background:none;font-size:20px;color:var(--ink-500)"><i class="ti ti-backspace"></i></button>
+    </div>
+    <button class="btn-ghost" style="margin-top:18px" onclick="S.pinSel=null;S.pinBuffer='';S.pinError='';R()">Volver</button>
+  </div>`;
+}
+
+function rolLabel(rol){
+  return rol === 'dueno' ? 'Dueño' : rol === 'cajero' ? 'Cajero' : rol === 'mesero' ? 'Mesero' : rol;
+}
+
+window.selectPinUser = function(id){ S.pinSel = id; S.pinBuffer=''; S.pinError=''; R(); };
+
+window.pinPress = async function(d){
+  if(S.pinBuffer.length >= 4) return;
+  S.pinBuffer += d;
+  R();
+  if(S.pinBuffer.length === 4){
+    const result = await DB.validarPinEmpleado(S.negocio.id, S.pinSel, S.pinBuffer);
+    if(result){
+      S.empleadoActivo = result;
+      S.pinSel = null; S.pinBuffer=''; S.pinError='';
+      R();
+    } else {
+      S.pinError = 'PIN incorrecto';
+      S.pinBuffer = '';
+      R();
+      setTimeout(()=>{ S.pinError=''; R(); }, 1800);
+    }
+  }
+};
+window.pinDelete = function(){ S.pinBuffer = S.pinBuffer.slice(0,-1); R(); };
+
+// ════════════════════════════════════════════════════════════
+// ABRIR TURNO
+// ════════════════════════════════════════════════════════════
+function renderAbrirTurno(){
+  return `<div class="center-screen fade">
+    <div style="width:64px;height:64px;border-radius:50%;background:var(--warn-soft);display:flex;align-items:center;justify-content:center;margin-bottom:16px"><i class="ti ti-clock" style="font-size:28px;color:var(--warn)"></i></div>
+    <div style="font-size:19px;font-weight:800;margin-bottom:4px">Abrí tu turno</div>
+    <div style="font-size:13px;color:var(--ink-500);margin-bottom:24px">${S.negocio.nombre} · ${S.empleadoActivo?.nombre}</div>
+    <div class="field" style="width:100%">
+      <label class="lbl">Efectivo en caja al inicio</label>
+      <input id="at-monto" type="number" placeholder="$0" style="font-size:20px;font-weight:700">
+    </div>
+    <button class="btn-primary" onclick="doAbrirTurno()"><i class="ti ti-clock-play"></i> Abrir turno</button>
+  </div>`;
+}
+
+window.doAbrirTurno = async function(){
+  const monto = parseFloat(document.getElementById('at-monto').value) || 0;
+  const { data, error } = await DB.abrirTurno(S.negocio.id, S.empleadoActivo.id, monto);
+  if(!error){ S.turno = data; R(); }
+};
+
+// ════════════════════════════════════════════════════════════
+// TAB BAR
+// ════════════════════════════════════════════════════════════
+function renderTabBar(){
+  const rol = S.empleadoActivo?.rol;
+  const tabs = [
+    { id: 'vender', icon: 'ti-shopping-cart', label: 'Vender', show: rol !== 'mesero' },
+    { id: 'mesas', icon: 'ti-armchair', label: 'Mesas', show: S.negocio.rubro === 'restaurante' },
+    { id: 'caja', icon: 'ti-clock', label: 'Caja', show: rol !== 'mesero' },
+    { id: 'mas', icon: 'ti-grid-dots', label: 'Más', show: true },
+  ].filter(t => t.show);
+
+  return `<div style="display:flex;background:#fff;border-top:1px solid var(--ink-100);padding:8px var(--sp-2) calc(8px + env(safe-area-inset-bottom))">
+    ${tabs.map(t => `
+      <div onclick="goTab('${t.id}')" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0;position:relative;cursor:pointer">
+        <i class="ti ${t.icon}" style="font-size:23px;color:${S.tab===t.id ? A : 'var(--ink-500)'}"></i>
+        <span style="font-size:11px;font-weight:700;color:${S.tab===t.id ? A : 'var(--ink-500)'}">${t.label}</span>
+        ${S.tab===t.id ? `<div style="position:absolute;top:-8px;left:50%;transform:translateX(-50%);width:28px;height:3px;border-radius:99px;background:${A}"></div>` : ''}
+      </div>`).join('')}
+  </div>`;
+}
+
+window.goTab = function(tab){ S.tab = tab; S.masScreen = null; R(); };
+
+// ════════════════════════════════════════════════════════════
+// HEADER reutilizable
+// ════════════════════════════════════════════════════════════
+function header(title, opts = {}){
+  const { back = null, right = '' } = opts;
+  return `<div style="padding:16px var(--sp-4) 12px;display:flex;align-items:center;gap:12px;background:#fff;border-bottom:1px solid var(--ink-100)">
+    ${back ? `<button onclick="${back}" style="width:38px;height:38px;border-radius:99px;background:var(--ink-100);border:none;display:flex;align-items:center;justify-content:center;font-size:18px;color:var(--ink-700)"><i class="ti ti-arrow-left"></i></button>` : `${LOGO_ICO}`}
+    <span style="font-size:17px;font-weight:800;flex:1">${title}</span>
+    ${right}
+  </div>`;
+}
+
+window.logout = async function(){
+  await DB.sb.auth.signOut();
+  window.location.href = './auth.html';
+};
+
+
+// ════════════════════════════════════════════════════════════
+// VENDER
+// ════════════════════════════════════════════════════════════
+function cartCount(){ return Object.values(S.cart).reduce((a,b)=>a+b,0); }
+function cartSub(){ return Object.entries(S.cart).reduce((a,[id,q])=>{ const p=S.productos.find(x=>x.id===id); return p ? a + p.precio*q : a; },0); }
+function discAmt(){ return Math.round(cartSub() * (S.disc/100)); }
+function cartTotal(){ return cartSub() - discAmt(); }
+
+function renderVender(){
+  const fil = S.productos.filter(p => (S.fcat==='Todos' || p.categoria_id===S.fcat) && p.nombre.toLowerCase().includes(S.fq.toLowerCase()));
+  const cnt = cartCount();
+
+  return `<div style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+    <div style="padding:16px var(--sp-4) 10px;background:#fff;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--ink-100)">
+      ${LOGO_ICO}
+      <div style="flex:1;min-width:0">
+        <div style="font-size:14px;font-weight:800;line-height:1.15">${S.negocio.nombre}</div>
+        <div style="font-size:11px;color:${MONEY};font-weight:700;display:flex;align-items:center;gap:4px"><span style="width:6px;height:6px;border-radius:50%;background:${MONEY}"></span>Turno abierto</div>
+      </div>
+      <button onclick="S.sheet='empleado-info';R()" style="width:38px;height:38px;border-radius:50%;background:var(--brand-soft);border:none;font-size:14px;font-weight:800;color:var(--brand)">${(S.empleadoActivo?.nombre||'D').charAt(0).toUpperCase()}</button>
+    </div>
+
+    <div style="padding:12px var(--sp-4) 8px;background:#fff">
+      <div style="background:var(--ink-100);border-radius:var(--r-sm);padding:12px 14px;display:flex;align-items:center;gap:9px;margin-bottom:10px">
+        <i class="ti ti-search" style="color:var(--ink-500);font-size:18px"></i>
+        <input id="vd-search" value="${S.fq}" oninput="S.fq=this.value;R()" placeholder="Buscar artículo..." style="background:none;border:none;flex:1;font-size:15px;padding:0">
+      </div>
+      <div style="display:flex;gap:7px;overflow-x:auto;padding-bottom:10px">
+        <button onclick="S.fcat='Todos';R()" style="padding:8px 16px;border-radius:99px;font-size:13px;font-weight:700;white-space:nowrap;border:none;background:${S.fcat==='Todos'?'var(--ink-900)':'var(--ink-100)'};color:${S.fcat==='Todos'?'#fff':'var(--ink-700)'};flex-shrink:0">Todos</button>
+        ${S.categorias.map(c => `<button onclick="S.fcat='${c.id}';R()" style="padding:8px 16px;border-radius:99px;font-size:13px;font-weight:700;white-space:nowrap;border:none;background:${S.fcat===c.id?'var(--ink-900)':'var(--ink-100)'};color:${S.fcat===c.id?'#fff':'var(--ink-700)'};flex-shrink:0">${c.nombre}</button>`).join('')}
+      </div>
+    </div>
+
+    <div style="flex:1;overflow-y:auto;padding:4px var(--sp-4) 4px">
+      ${!fil.length ? `<div style="text-align:center;padding:40px 20px;color:var(--ink-500)"><i class="ti ti-package" style="font-size:38px;display:block;margin-bottom:10px"></i><p style="font-size:13px">${S.productos.length?'Sin resultados.':'Agregá artículos desde Más → Artículos.'}</p></div>`
+      : `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        ${fil.map(p => {
+          const qty = S.cart[p.id] || 0;
+          const oos = p.controla_stock && p.stock <= 0;
+          return `<div onclick="${oos?'':`addToCart('${p.id}')`}" class="card" style="overflow:hidden;position:relative;${oos?'opacity:.4':'cursor:pointer'}">
+            ${qty>0 ? `<div style="position:absolute;top:8px;right:8px;width:26px;height:26px;border-radius:50%;background:${MONEY};color:#fff;font-size:13px;font-weight:800;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 10px rgba(15,157,88,.4);z-index:2">${qty}</div>` : ''}
+            ${p.controla_stock ? `<div style="position:absolute;top:8px;left:8px;font-size:10px;font-weight:800;padding:3px 7px;border-radius:99px;background:rgba(255,255,255,.92);color:${p.stock<=p.stock_minimo?'var(--warn)':'var(--ink-700)'};z-index:2">${p.stock<=0?'Sin stock':p.stock+' u.'}</div>` : ''}
+            <div style="height:78px;display:flex;align-items:center;justify-content:center;font-size:34px;background:${p.color||'#eee'}33">${p.emoji||'📦'}</div>
+            <div style="padding:10px 12px 12px">
+              <div style="font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:5px">${p.nombre}</div>
+              <div style="font-size:17px;font-weight:800;color:${A}">${f$(p.precio)}</div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`}
+    </div>
+
+    <div style="padding:10px var(--sp-4);background:#fff;border-top:1px solid var(--ink-100)">
+      <div style="background:${MONEY};border-radius:var(--r-lg);padding:6px 6px 6px 18px;display:flex;align-items:center;gap:14px;box-shadow:var(--shadow-cta);${cnt===0?'opacity:.5':''}" ${cnt>0?'onclick="S.sheet=\'cart\';R()"':''}>
+        <div style="flex:1;color:#fff">
+          <div style="font-size:12px;color:rgba(255,255,255,.75);font-weight:700">${cnt>0?cnt+' artículo'+(cnt>1?'s':''):'Ticket vacío'}</div>
+          ${cnt>0?`<div style="font-size:24px;font-weight:800;letter-spacing:-.3px">${f$(cartTotal())}</div>`:''}
+        </div>
+        ${cnt>0?`<button style="padding:16px 22px;background:#fff;color:${MONEY};border-radius:var(--r-md);font-size:16px;font-weight:800;border:none;display:flex;align-items:center;gap:8px">Cobrar <i class="ti ti-arrow-right"></i></button>`:''}
+      </div>
+    </div>
+
+    ${S.sheet==='cart' ? sheetCart() : ''}
+    ${S.sheet==='checkout' ? sheetCheckout() : ''}
+    ${S.sheet==='success' ? sheetSuccess() : ''}
+  </div>`;
+}
+
+window.addToCart = function(pid){
+  const p = S.productos.find(x=>x.id===pid);
+  if(!p) return;
+  const cur = S.cart[pid] || 0;
+  if(p.controla_stock && p.stock - cur <= 0) return;
+  S.cart = { ...S.cart, [pid]: cur + 1 };
+  R();
+};
+window.adjCart = function(pid, delta){
+  const p = S.productos.find(x=>x.id===pid);
+  const cur = S.cart[pid] || 0;
+  const next = cur + delta;
+  if(next <= 0){ const c = {...S.cart}; delete c[pid]; S.cart = c; }
+  else { if(delta>0 && p.controla_stock && p.stock - cur <= 0) return; S.cart = {...S.cart, [pid]: next}; }
+  R();
+};
+
+function sheetBg(inner){
+  return `<div style="position:fixed;inset:0;background:rgba(15,23,42,.55);display:flex;align-items:flex-end;z-index:50;max-width:430px;margin:0 auto">
+    <div style="background:#fff;border-radius:26px 26px 0 0;padding:10px var(--sp-4) max(var(--sp-5),env(safe-area-inset-bottom));width:100%;max-height:82vh;overflow-y:auto">
+      <div style="width:40px;height:5px;border-radius:99px;background:var(--ink-100);margin:6px auto 16px"></div>
+      ${inner}
+    </div>
+  </div>`;
+}
+
+function sheetCart(){
+  const items = Object.entries(S.cart).filter(([,q])=>q>0);
+  return sheetBg(`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <span style="font-size:17px;font-weight:800">Ticket</span>
+      <button onclick="S.sheet=null;R()" style="width:34px;height:34px;background:var(--ink-100);border:none;border-radius:50%;font-size:17px"><i class="ti ti-x"></i></button>
+    </div>
+    ${items.map(([id,q])=>{
+      const p = S.productos.find(x=>x.id===id); if(!p) return '';
+      return `<div style="display:flex;align-items:center;gap:11px;padding:11px 0;border-bottom:1px solid var(--ink-100)">
+        <div style="width:42px;height:42px;border-radius:12px;background:${p.color||'#eee'}33;display:flex;align-items:center;justify-content:center;font-size:19px;flex-shrink:0">${p.emoji||'📦'}</div>
+        <div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.nombre}</div><div style="font-size:12px;color:var(--ink-500);font-weight:600">${f$(p.precio)} c/u</div></div>
+        <div style="display:flex;align-items:center;gap:8px;background:var(--ink-100);border-radius:99px;padding:5px">
+          <button onclick="adjCart('${id}',-1)" style="width:26px;height:26px;border-radius:50%;background:#fff;border:none;font-size:15px;font-weight:800;box-shadow:var(--shadow-card)">−</button>
+          <span style="font-size:14px;font-weight:800;min-width:16px;text-align:center">${q}</span>
+          <button onclick="adjCart('${id}',1)" style="width:26px;height:26px;border-radius:50%;background:#fff;border:none;font-size:15px;font-weight:800;box-shadow:var(--shadow-card)">+</button>
+        </div>
+        <div style="font-size:15px;font-weight:800;min-width:62px;text-align:right">${f$(p.precio*q)}</div>
+      </div>`;
+    }).join('')}
+    <div style="background:var(--ink-100);border-radius:var(--r-md);padding:14px 16px;margin:14px 0">
+      <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--ink-700);font-weight:600;margin-bottom:6px"><span>Subtotal</span><span>${f$(cartSub())}</span></div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <span style="font-size:13px;color:var(--ink-700);font-weight:600">Descuento %</span>
+        <input type="number" value="${S.disc||''}" oninput="S.disc=parseFloat(this.value)||0;R()" placeholder="0" style="width:60px;padding:6px 8px;font-size:13px;text-align:center">
+        ${discAmt()>0?`<span style="font-size:12px;color:var(--danger);font-weight:700;margin-left:auto">−${f$(discAmt())}</span>`:''}
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid var(--ink-300);padding-top:8px;margin-top:6px">
+        <span style="font-size:15px;font-weight:700">Total</span>
+        <span style="font-size:26px;font-weight:800;color:var(--ink-900)">${f$(cartTotal())}</span>
+      </div>
+    </div>
+    <button class="btn-money" onclick="S.sheet='checkout';S.cstep='metodo';R()">Cobrar ${f$(cartTotal())}</button>
+    <button class="btn-ghost" style="margin-top:8px" onclick="S.cart={};S.disc=0;S.sheet=null;R()">Vaciar ticket</button>
+  `);
+}
+
+function sheetCheckout(){
+  if(S.cstep === 'metodo') return sheetCheckoutMetodo();
+  if(S.cstep === 'ctacte') return sheetCheckoutCtaCte();
+  return sheetCheckoutConfirm();
+}
+
+function sheetCheckoutMetodo(){
+  const metodos = [
+    {id:'efectivo', icon:'ti-cash', label:'Efectivo'},
+    {id:'transferencia', icon:'ti-transfer', label:'Transfer.'},
+    {id:'tarjeta', icon:'ti-credit-card', label:'Tarjeta'},
+  ];
+  return sheetBg(`
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+      <span style="font-size:17px;font-weight:800">Cobrar</span>
+      <span style="font-size:24px;font-weight:800">${f$(cartTotal())}</span>
+      <button onclick="S.sheet='cart';R()" style="width:34px;height:34px;background:var(--ink-100);border:none;border-radius:50%;font-size:17px"><i class="ti ti-x"></i></button>
+    </div>
+    <div style="font-size:13px;color:var(--ink-500);font-weight:600;margin-bottom:16px">¿Cómo paga el cliente?</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">
+      ${metodos.map(m => `<div onclick="S.pm='${m.id}';S.cstep='confirm';R()" style="padding:16px 6px;border-radius:var(--r-md);background:var(--ink-100);text-align:center;border:2px solid transparent">
+        <i class="ti ${m.icon}" style="font-size:24px;color:var(--ink-700);display:block;margin-bottom:6px"></i>
+        <span style="font-size:12px;font-weight:700;color:var(--ink-700)">${m.label}</span>
+      </div>`).join('')}
+    </div>
+    ${S.clientes.length ? `<div onclick="S.pm='ctacte';S.cstep='ctacte';S.selCliente=null;S.csq='';R()" style="display:flex;align-items:center;gap:13px;padding:15px;border-radius:var(--r-md);background:var(--warn-soft)">
+      <div style="width:38px;height:38px;border-radius:11px;background:#fde0b4;display:flex;align-items:center;justify-content:center;font-size:18px;color:var(--warn)"><i class="ti ti-user-dollar"></i></div>
+      <div><div style="font-size:14px;font-weight:800;color:var(--warn)">Cuenta corriente</div><div style="font-size:11px;color:var(--ink-500);font-weight:600">Cargar a un cliente</div></div>
+    </div>` : ''}
+  `);
+}
+
+function sheetCheckoutCtaCte(){
+  const c = S.clientes.find(x=>x.id===S.selCliente);
+  return sheetBg(`
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+      <button onclick="S.cstep='metodo';S.selCliente=null;R()" style="width:34px;height:34px;background:var(--ink-100);border:none;border-radius:50%;font-size:16px"><i class="ti ti-arrow-left"></i></button>
+      <span style="font-size:17px;font-weight:800">Cuenta corriente</span>
+    </div>
+    ${!c ? `
+      <input value="${S.csq}" oninput="S.csq=this.value;R()" placeholder="Buscar cliente..." style="margin-bottom:12px">
+      <div style="max-height:300px;overflow-y:auto">
+        ${S.clientes.filter(cl=>cl.nombre.toLowerCase().includes(S.csq.toLowerCase())).map(cl=>`
+          <div onclick="S.selCliente='${cl.id}';R()" style="display:flex;align-items:center;gap:11px;padding:12px;border-radius:var(--r-md);background:var(--ink-100);margin-bottom:8px;cursor:pointer">
+            <div style="width:38px;height:38px;border-radius:50%;background:var(--brand-soft);color:${A};display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800">${cl.nombre.charAt(0).toUpperCase()}</div>
+            <span style="font-size:14px;font-weight:700">${cl.nombre}</span>
+          </div>`).join('')}
+      </div>` : `
+      <div style="display:flex;align-items:center;gap:12px;padding:14px;background:var(--brand-soft);border-radius:var(--r-md);margin-bottom:14px">
+        <div style="width:42px;height:42px;border-radius:50%;background:${A};color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800">${c.nombre.charAt(0).toUpperCase()}</div>
+        <div style="font-size:15px;font-weight:800;color:var(--brand-deep)">${c.nombre}</div>
+      </div>
+      <button class="btn-primary" onclick="confirmarVentaCtaCte()"><i class="ti ti-user-dollar"></i> Cargar a ${c.nombre.split(' ')[0]}</button>
+    `}
+  `);
+}
+
+function sheetCheckoutConfirm(){
+  const labels = { efectivo:'Efectivo', transferencia:'Transferencia', tarjeta:'Tarjeta' };
+  const cash = parseFloat(S.cash) || 0;
+  const vuelto = S.pm==='efectivo' && cash>0 ? Math.max(0, cash - cartTotal()) : 0;
+  return sheetBg(`
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+      <button onclick="S.cstep='metodo';R()" style="width:34px;height:34px;background:var(--ink-100);border:none;border-radius:50%;font-size:16px"><i class="ti ti-arrow-left"></i></button>
+      <span style="font-size:17px;font-weight:800">${labels[S.pm]}</span>
+    </div>
+    <div style="text-align:center;margin-bottom:16px"><div style="font-size:12px;color:var(--ink-500);font-weight:700">Total</div><div style="font-size:36px;font-weight:800">${f$(cartTotal())}</div></div>
+    ${S.pm==='efectivo' ? `
+      <label class="lbl">Efectivo recibido</label>
+      <input id="ck-cash" type="number" value="${S.cash}" oninput="S.cash=this.value;updVuelto()" placeholder="${cartTotal()}" style="font-size:22px;font-weight:800;margin-bottom:10px">
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        ${[cartTotal(), Math.ceil(cartTotal()/1000)*1000, Math.ceil(cartTotal()/5000)*5000].filter((v,i,a)=>a.indexOf(v)===i).map(v=>`<button onclick="document.getElementById('ck-cash').value=${v};S.cash='${v}';updVuelto()" style="flex:1;padding:9px;border-radius:var(--r-sm);background:var(--ink-100);border:none;font-size:12px;font-weight:700;color:var(--ink-700)">${f$(v)}</button>`).join('')}
+      </div>
+      <div id="vuelto-box" style="display:${vuelto>0?'flex':'none'};justify-content:space-between;align-items:center;background:var(--money-soft);border-radius:var(--r-md);padding:13px 16px;margin-bottom:14px">
+        <span style="font-size:13px;color:var(--money-deep);font-weight:700">Vuelto</span><span id="vuelto-val" style="font-size:20px;font-weight:800;color:var(--money-deep)">${f$(vuelto)}</span>
+      </div>` : ''}
+    <button class="btn-money" onclick="confirmarVentaDirecta()"><i class="ti ti-check"></i> Confirmar venta</button>
+  `);
+}
+
+window.updVuelto = function(){
+  const cash = parseFloat(document.getElementById('ck-cash').value) || 0;
+  const vuelto = Math.max(0, cash - cartTotal());
+  const box = document.getElementById('vuelto-box'); const val = document.getElementById('vuelto-val');
+  if(box) box.style.display = vuelto>0?'flex':'none';
+  if(val) val.textContent = f$(vuelto);
+};
+
+function itemsParaVenta(){
+  return Object.entries(S.cart).map(([id,q])=>{
+    const p = S.productos.find(x=>x.id===id);
+    return { producto_id: id, nombre_producto: p.nombre, precio_unitario: p.precio, cantidad: q };
+  });
+}
+
+async function finalizarVenta(metodoPago, clienteId){
+  const { data, error } = await DB.registrarVenta({
+    negocioId: S.negocio.id, empleadoId: S.empleadoActivo.id, turnoId: S.turno.id,
+    clienteId: clienteId || null,
+    subtotal: cartSub(), descuento: discAmt(), total: cartTotal(),
+    metodoPago, efectivoRecibido: metodoPago==='efectivo' ? (parseFloat(S.cash)||0) : null,
+    nota: S.nota || null, items: itemsParaVenta(),
+  });
+  if(error){ alert('Error al registrar venta: ' + error.message); return; }
+
+  // Refrescar productos (por el stock descontado)
+  S.productos = await DB.listarProductos(S.negocio.id);
+  S.lastSale = { total: cartTotal(), items: Object.keys(S.cart).length };
+  S.cart = {}; S.disc = 0; S.nota=''; S.cash=''; S.selCliente=null;
+  S.sheet = 'success'; S.cstep='metodo';
+  R();
+}
+window.confirmarVentaDirecta = function(){ finalizarVenta(S.pm, null); };
+window.confirmarVentaCtaCte = function(){ finalizarVenta('ctacte', S.selCliente); };
+
+function sheetSuccess(){
+  const s = S.lastSale || {};
+  return sheetBg(`
+    <div style="text-align:center">
+      <div style="width:68px;height:68px;border-radius:50%;background:var(--money-soft);display:flex;align-items:center;justify-content:center;margin:0 auto 14px"><i class="ti ti-check" style="font-size:32px;color:${MONEY}"></i></div>
+      <div style="font-size:32px;font-weight:800;color:${A};margin-bottom:4px">${f$(s.total)}</div>
+      <div style="font-size:13px;color:var(--ink-500);font-weight:600;margin-bottom:20px">${s.items} artículo${s.items>1?'s':''} · venta registrada</div>
+      <button class="btn-primary" onclick="S.sheet=null;R()">Nueva venta</button>
+    </div>
+  `);
+}
+
+
+// ════════════════════════════════════════════════════════════
+// MESAS
+// ════════════════════════════════════════════════════════════
+function renderMesas(){
+  if(S.mesaSel) return renderComanda();
+
+  const zonas = [...new Set(S.mesas.map(m=>m.zona))];
+  if(!zonas.includes(S.mesaZona) && zonas.length) S.mesaZona = zonas[0];
+  const enZona = S.mesas.filter(m => m.zona === S.mesaZona);
+  const ocupadas = S.mesas.filter(m=>m.estado==='ocupada').length;
+  const listas = S.mesas.filter(m=>m.estado==='lista').length;
+  const libres = S.mesas.filter(m=>m.estado==='libre').length;
+
+  return `<div style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+    ${header('Mesas', { right: `<button onclick="nuevaMesa()" style="width:36px;height:36px;border-radius:99px;background:${A};border:none;color:#fff;font-size:17px"><i class="ti ti-plus"></i></button>` })}
+    <div style="display:flex;gap:10px;padding:12px var(--sp-4);background:#fff">
+      <div style="flex:1;text-align:center;padding:9px;border-radius:var(--r-sm);background:var(--ink-100)"><div style="font-size:18px;font-weight:800;color:${A}">${ocupadas}</div><div style="font-size:10px;color:var(--ink-500);font-weight:700">Ocupadas</div></div>
+      <div style="flex:1;text-align:center;padding:9px;border-radius:var(--r-sm);background:var(--ink-100)"><div style="font-size:18px;font-weight:800;color:${MONEY}">${listas}</div><div style="font-size:10px;color:var(--ink-500);font-weight:700">Para cobrar</div></div>
+      <div style="flex:1;text-align:center;padding:9px;border-radius:var(--r-sm);background:var(--ink-100)"><div style="font-size:18px;font-weight:800;color:var(--ink-500)">${libres}</div><div style="font-size:10px;color:var(--ink-500);font-weight:700">Libres</div></div>
+    </div>
+    <div style="display:flex;gap:8px;padding:0 var(--sp-4) 12px;background:#fff;overflow-x:auto;border-bottom:1px solid var(--ink-100)">
+      ${zonas.map(z=>`<button onclick="S.mesaZona='${z}';R()" style="padding:8px 16px;border-radius:99px;font-size:13px;font-weight:700;white-space:nowrap;border:none;background:${S.mesaZona===z?'var(--ink-900)':'var(--ink-100)'};color:${S.mesaZona===z?'#fff':'var(--ink-700)'}">${z}</button>`).join('')}
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:14px var(--sp-4)">
+      ${!enZona.length ? `<div style="text-align:center;padding:30px;color:var(--ink-500)"><i class="ti ti-armchair" style="font-size:36px;display:block;margin-bottom:10px"></i><p style="font-size:13px">Sin mesas en ${S.mesaZona}. Tocá + para agregar.</p></div>` : `
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+        ${enZona.map(m => {
+          const colors = { libre:{bg:'#fff',bd:'var(--ink-300)',dash:true}, ocupada:{bg:'var(--brand-soft)',bd:A,dash:false}, lista:{bg:'var(--money-soft)',bd:MONEY,dash:false} };
+          const c = colors[m.estado] || colors.libre;
+          return `<div onclick="abrirMesa('${m.id}')" class="card" style="aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;background:${c.bg};border:${c.dash?'2px dashed '+c.bd:'2px solid '+c.bd};position:relative;cursor:pointer">
+            ${!c.dash ? `<span style="position:absolute;top:8px;right:8px;width:8px;height:8px;border-radius:50%;background:${c.bd}"></span>` : ''}
+            <div style="font-size:15px;font-weight:800">${m.nombre}</div>
+            <div style="font-size:11px;color:var(--ink-500);font-weight:600"><i class="ti ti-users" style="font-size:10px"></i> ${m.capacidad}</div>
+          </div>`;
+        }).join('')}
+      </div>`}
+    </div>
+  </div>`;
+}
+
+window.nuevaMesa = async function(){
+  const nombre = prompt('Nombre de la nueva mesa:');
+  if(!nombre) return;
+  const { data } = await DB.crearMesa(S.negocio.id, nombre, S.mesaZona || 'Salón', 4);
+  if(data) S.mesas.push(data);
+  R();
+};
+
+window.abrirMesa = async function(mid){
+  S.mesaSel = mid;
+  S.mesaPedidos = await DB.listarPedidosMesa(mid);
+  R();
+};
+
+function renderComanda(){
+  const m = S.mesas.find(x=>x.id===S.mesaSel);
+  if(!m){ S.mesaSel=null; R(); return ''; }
+  const pedidos = S.mesaPedidos || [];
+  const total = pedidos.reduce((a,p)=>a+p.precio_unitario*p.cantidad,0);
+
+  return `<div style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+    ${header(m.nombre, { back: "S.mesaSel=null;R()", right: `<span style="font-size:12px;font-weight:700;color:var(--ink-500)">${m.estado==='libre'?'Libre':m.estado==='lista'?'Para cobrar':'Ocupada'}</span>` })}
+    <div style="flex:1;overflow-y:auto;padding:12px var(--sp-4)">
+      ${!pedidos.length ? `<div style="text-align:center;padding:40px;color:var(--ink-500)"><i class="ti ti-clipboard-list" style="font-size:36px;display:block;margin-bottom:10px"></i><p style="font-size:13px">Comanda vacía</p></div>`
+      : pedidos.map(p => `<div style="display:flex;align-items:center;gap:11px;padding:11px 0;border-bottom:1px solid var(--ink-100)">
+          <div style="flex:1"><div style="font-size:14px;font-weight:700">${p.nombre_producto}</div><div style="font-size:12px;color:var(--ink-500);font-weight:600">${f$(p.precio_unitario)} c/u</div></div>
+          <div style="display:flex;align-items:center;gap:8px;background:var(--ink-100);border-radius:99px;padding:5px">
+            <button onclick="cambiarCantPedido('${p.id}',${p.cantidad-1})" style="width:26px;height:26px;border-radius:50%;background:#fff;border:none;font-size:15px;font-weight:800;box-shadow:var(--shadow-card)">−</button>
+            <span style="font-size:14px;font-weight:800;min-width:16px;text-align:center">${p.cantidad}</span>
+            <button onclick="cambiarCantPedido('${p.id}',${p.cantidad+1})" style="width:26px;height:26px;border-radius:50%;background:#fff;border:none;font-size:15px;font-weight:800;box-shadow:var(--shadow-card)">+</button>
+          </div>
+          <div style="font-size:15px;font-weight:800;min-width:62px;text-align:right">${f$(p.precio_unitario*p.cantidad)}</div>
+        </div>`).join('')}
+    </div>
+    <div style="padding:12px var(--sp-4);background:#fff;border-top:1px solid var(--ink-100)">
+      ${total>0?`<div style="display:flex;justify-content:space-between;margin-bottom:10px"><span style="font-size:14px;font-weight:700;color:var(--ink-700)">Total</span><span style="font-size:22px;font-weight:800">${f$(total)}</span></div>`:''}
+      <div style="display:flex;gap:9px">
+        <button onclick="S.mesaAddView=true;S.mesaFq='';R()" style="flex:1;padding:13px;background:var(--ink-100);border:none;border-radius:var(--r-md);font-size:14px;font-weight:700;color:var(--ink-700);display:flex;align-items:center;justify-content:center;gap:6px"><i class="ti ti-plus"></i>Agregar</button>
+        ${total>0?`<button class="btn-money" style="flex:1" onclick="S.mesaCobrarSheet=true;S.mesaPM='efectivo';S.mesaCash='';R()">Cobrar</button>`:''}
+      </div>
+    </div>
+    ${S.mesaAddView ? sheetAgregarAMesa() : ''}
+    ${S.mesaCobrarSheet ? sheetCobrarMesa(total) : ''}
+  </div>`;
+}
+
+window.cambiarCantPedido = async function(pid, nuevaCant){
+  await DB.actualizarCantidadPedido(pid, nuevaCant);
+  S.mesaPedidos = await DB.listarPedidosMesa(S.mesaSel);
+  R();
+};
+
+function sheetAgregarAMesa(){
+  const fil = S.productos.filter(p => p.nombre.toLowerCase().includes(S.mesaFq.toLowerCase()));
+  return sheetBg(`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <span style="font-size:16px;font-weight:800">Agregar producto</span>
+      <button onclick="S.mesaAddView=false;R()" style="width:32px;height:32px;background:var(--ink-100);border:none;border-radius:50%"><i class="ti ti-x"></i></button>
+    </div>
+    <input value="${S.mesaFq}" oninput="S.mesaFq=this.value;R()" placeholder="Buscar producto..." style="margin-bottom:12px">
+    <div style="max-height:340px;overflow-y:auto">
+      ${fil.map(p => `<div onclick="agregarAMesa('${p.id}')" style="display:flex;align-items:center;gap:11px;padding:10px 4px;border-bottom:1px solid var(--ink-100);cursor:pointer">
+        <div style="width:40px;height:40px;border-radius:11px;background:${p.color||'#eee'}33;display:flex;align-items:center;justify-content:center;font-size:18px">${p.emoji||'📦'}</div>
+        <span style="flex:1;font-size:14px;font-weight:700">${p.nombre}</span>
+        <span style="font-size:14px;font-weight:800;color:${A}">${f$(p.precio)}</span>
+      </div>`).join('')}
+    </div>
+  `);
+}
+
+window.agregarAMesa = async function(pid){
+  const p = S.productos.find(x=>x.id===pid);
+  await DB.agregarPedidoMesa(S.mesaSel, S.negocio.id, S.empleadoActivo.id, p);
+  await DB.actualizarMesa(S.mesaSel, { estado: 'ocupada', abierta_en: new Date().toISOString() });
+  S.mesaPedidos = await DB.listarPedidosMesa(S.mesaSel);
+  const m = S.mesas.find(x=>x.id===S.mesaSel); if(m) m.estado='ocupada';
+  S.mesaAddView = false;
+  R();
+};
+
+function sheetCobrarMesa(total){
+  const metodos = [{id:'efectivo',icon:'ti-cash',label:'Efectivo'},{id:'transferencia',icon:'ti-transfer',label:'Transfer.'},{id:'tarjeta',icon:'ti-credit-card',label:'Tarjeta'}];
+  const cash = parseFloat(S.mesaCash)||0;
+  const vuelto = S.mesaPM==='efectivo' && cash>0 ? Math.max(0,cash-total) : 0;
+  return sheetBg(`
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px">
+      <span style="font-size:17px;font-weight:800">Cobrar mesa</span>
+      <span style="font-size:22px;font-weight:800">${f$(total)}</span>
+      <button onclick="S.mesaCobrarSheet=false;R()" style="width:34px;height:34px;background:var(--ink-100);border:none;border-radius:50%"><i class="ti ti-x"></i></button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">
+      ${metodos.map(m=>`<div onclick="S.mesaPM='${m.id}';R()" style="padding:14px 6px;border-radius:var(--r-md);text-align:center;background:${S.mesaPM===m.id?'var(--brand-soft)':'var(--ink-100)'};border:2px solid ${S.mesaPM===m.id?A:'transparent'}">
+        <i class="ti ${m.icon}" style="font-size:21px;color:${S.mesaPM===m.id?A:'var(--ink-700)'};display:block;margin-bottom:5px"></i>
+        <span style="font-size:11px;font-weight:700;color:${S.mesaPM===m.id?A:'var(--ink-700)'}">${m.label}</span>
+      </div>`).join('')}
+    </div>
+    ${S.mesaPM==='efectivo'?`
+      <input id="mc-cash" type="number" value="${S.mesaCash}" oninput="S.mesaCash=this.value;R()" placeholder="${total}" style="font-size:20px;font-weight:800;margin-bottom:10px">
+      ${vuelto>0?`<div style="background:var(--money-soft);border-radius:var(--r-md);padding:12px 14px;display:flex;justify-content:space-between;margin-bottom:12px"><span style="color:var(--money-deep);font-weight:700;font-size:13px">Vuelto</span><span style="font-size:18px;font-weight:800;color:var(--money-deep)">${f$(vuelto)}</span></div>`:''}
+    `:''}
+    <button class="btn-money" onclick="confirmarCobroMesa(${total})"><i class="ti ti-check"></i> Confirmar cobro</button>
+  `);
+}
+
+window.confirmarCobroMesa = async function(total){
+  const items = (S.mesaPedidos||[]).map(p=>({ producto_id: p.producto_id, nombre_producto: p.nombre_producto, precio_unitario: p.precio_unitario, cantidad: p.cantidad }));
+  const { error } = await DB.registrarVenta({
+    negocioId: S.negocio.id, empleadoId: S.empleadoActivo.id, turnoId: S.turno.id,
+    mesaId: S.mesaSel, subtotal: total, descuento: 0, total,
+    metodoPago: S.mesaPM, efectivoRecibido: S.mesaPM==='efectivo'?(parseFloat(S.mesaCash)||0):null,
+    items,
+  });
+  if(error){ alert('Error: '+error.message); return; }
+  await DB.vaciarPedidosMesa(S.mesaSel);
+  await DB.actualizarMesa(S.mesaSel, { estado:'libre', abierta_en: null });
+  const m = S.mesas.find(x=>x.id===S.mesaSel); if(m) m.estado='libre';
+  S.productos = await DB.listarProductos(S.negocio.id);
+  S.mesaCobrarSheet=false; S.mesaSel=null;
+  R();
+};
+
+// ════════════════════════════════════════════════════════════
+// CAJA (turno)
+// ════════════════════════════════════════════════════════════
+function renderCaja(){
+  return `<div style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+    ${header('Caja', { right: `<button onclick="S.sheet='cerrar-turno';R()" style="font-size:13px;font-weight:700;color:var(--danger);background:none;border:none">Cerrar</button>` })}
+    <div style="flex:1;overflow-y:auto;padding:14px var(--sp-4)">
+      <div style="background:var(--money-soft);border-radius:var(--r-md);padding:13px 16px;display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        <span style="width:8px;height:8px;border-radius:50%;background:${MONEY}"></span>
+        <span style="font-size:13px;color:var(--money-deep);font-weight:700">Turno abierto · Inicial: ${f$(S.turno.monto_inicial)}</span>
+      </div>
+      <div id="caja-resumen" style="text-align:center;padding:30px;color:var(--ink-500)"><span class="spinner" style="border-top-color:${A};border-color:rgba(26,63,160,.2)"></span></div>
+    </div>
+    ${S.sheet==='cerrar-turno' ? sheetCerrarTurno() : ''}
+  </div>`;
+}
+
+async function cargarResumenCaja(){
+  const ventas = await DB.listarVentas(S.negocio.id, { turnoId: S.turno.id });
+  const total = ventas.reduce((a,v)=>a+v.total,0);
+  const efectivo = ventas.filter(v=>v.metodo_pago==='efectivo').reduce((a,v)=>a+v.total,0);
+  const el = document.getElementById('caja-resumen');
+  if(!el) return;
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;text-align:left">
+      <div class="card" style="padding:14px"><div style="font-size:11px;color:var(--ink-500);font-weight:700">Ventas</div><div style="font-size:20px;font-weight:800">${ventas.length}</div></div>
+      <div class="card" style="padding:14px"><div style="font-size:11px;color:var(--ink-500);font-weight:700">Total</div><div style="font-size:20px;font-weight:800;color:${A}">${f$(total)}</div></div>
+      <div class="card" style="padding:14px;grid-column:1/-1"><div style="font-size:11px;color:var(--ink-500);font-weight:700">Efectivo esperado en caja</div><div style="font-size:22px;font-weight:800;color:${MONEY}">${f$(S.turno.monto_inicial + efectivo)}</div></div>
+    </div>`;
+  S._efectivoEsperado = S.turno.monto_inicial + efectivo;
+}
+
+function sheetCerrarTurno(){
+  return sheetBg(`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <span style="font-size:17px;font-weight:800">Cerrar turno</span>
+      <button onclick="S.sheet=null;R()" style="width:34px;height:34px;background:var(--ink-100);border:none;border-radius:50%"><i class="ti ti-x"></i></button>
+    </div>
+    <div style="background:var(--ink-100);border-radius:var(--r-sm);padding:12px 14px;display:flex;justify-content:space-between;margin-bottom:12px">
+      <span style="font-size:13px;color:var(--ink-700);font-weight:600">Efectivo esperado</span><span style="font-size:14px;font-weight:800">${f$(S._efectivoEsperado||0)}</span>
+    </div>
+    <label class="lbl">Efectivo contado</label>
+    <input id="ct-monto" type="number" placeholder="$0" oninput="updDiferencia()" style="font-size:20px;font-weight:800;margin-bottom:10px">
+    <div id="dif-box" style="margin-bottom:14px"></div>
+    <button class="btn-danger-ghost" onclick="doCerrarTurno()">Confirmar cierre</button>
+  `);
+}
+
+window.updDiferencia = function(){
+  const decl = parseFloat(document.getElementById('ct-monto').value) || 0;
+  const dif = decl - (S._efectivoEsperado||0);
+  const box = document.getElementById('dif-box');
+  box.innerHTML = `<div style="background:${dif>=0?'var(--money-soft)':'var(--warn-soft)'};border-radius:var(--r-sm);padding:11px 13px;display:flex;justify-content:space-between"><span style="font-size:13px;font-weight:700;color:${dif>=0?'var(--money-deep)':'var(--warn)'}">${dif>=0?'Coincide':'Diferencia'}</span><span style="font-size:15px;font-weight:800;color:${dif>=0?'var(--money-deep)':'var(--warn)'}">${dif>=0?'+':''}${f$(dif)}</span></div>`;
+};
+
+window.doCerrarTurno = async function(){
+  const decl = parseFloat(document.getElementById('ct-monto').value) || 0;
+  const dif = decl - (S._efectivoEsperado||0);
+  await DB.cerrarTurno(S.turno.id, decl, dif);
+  S.turno = null; S.sheet = null;
+  R();
+};
+
+// ════════════════════════════════════════════════════════════
+// MÁS (menú secundario)
+// ════════════════════════════════════════════════════════════
+function renderMas(){
+  if(S.masScreen) return renderMasScreen();
+  const rol = S.empleadoActivo?.rol;
+  const items = [
+    { id:'productos', icon:'ti-package', label:'Artículos', show:true },
+    { id:'clientes', icon:'ti-users', label:'Clientes', show:rol!=='mesero' },
+    { id:'reportes', icon:'ti-chart-bar', label:'Reportes', show:rol==='dueno' },
+    { id:'finanzas', icon:'ti-chart-line', label:'Finanzas', show:rol==='dueno' },
+    { id:'empleados', icon:'ti-user-cog', label:'Empleados', show:rol==='dueno' },
+    { id:'config', icon:'ti-settings', label:'Configuración', show:rol==='dueno' },
+  ].filter(i=>i.show);
+
+  return `<div style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+    ${header('Más')}
+    <div style="flex:1;overflow-y:auto;padding:14px var(--sp-4)">
+      ${items.map(i=>`<div onclick="S.masScreen='${i.id}';R()" class="card" style="display:flex;align-items:center;gap:14px;padding:15px 16px;margin-bottom:9px;cursor:pointer">
+        <i class="ti ${i.icon}" style="font-size:21px;color:var(--ink-700)"></i>
+        <span style="flex:1;font-size:15px;font-weight:700">${i.label}</span>
+        <i class="ti ti-chevron-right" style="color:var(--ink-300)"></i>
+      </div>`).join('')}
+      <button class="btn-danger-ghost" style="margin-top:14px" onclick="logout()"><i class="ti ti-logout"></i> Cerrar sesión</button>
+    </div>
+  </div>`;
+}
+
+function renderMasScreen(){
+  const back = "S.masScreen=null;R()";
+  if(S.masScreen === 'productos') return renderProductos(back);
+  if(S.masScreen === 'clientes') return renderClientesScreen(back);
+  if(S.masScreen === 'empleados') return renderEmpleadosScreen(back);
+  return `<div style="display:flex;flex-direction:column;flex:1">${header('Próximamente', {back})}<div class="center-screen"><i class="ti ti-tools" style="font-size:36px;color:var(--ink-300)"></i><p style="margin-top:10px;color:var(--ink-500);font-size:13px">Este módulo se agrega en la próxima iteración.</p></div></div>`;
+}
+
+
+// ════════════════════════════════════════════════════════════
+// PRODUCTOS (alta/edición)
+// ════════════════════════════════════════════════════════════
+function renderProductos(back){
+  if(S.prodForm) return renderProductoForm(back);
+  return `<div style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+    ${header('Artículos', { back, right: `<button onclick="abrirNuevoProducto()" style="width:36px;height:36px;border-radius:99px;background:${A};border:none;color:#fff;font-size:17px"><i class="ti ti-plus"></i></button>` })}
+    <div style="flex:1;overflow-y:auto;padding:12px var(--sp-4)">
+      ${!S.productos.length ? `<div style="text-align:center;padding:40px;color:var(--ink-500)"><i class="ti ti-package" style="font-size:36px;display:block;margin-bottom:10px"></i><p style="font-size:13px">Tocá + para agregar tu primer artículo.</p></div>`
+      : S.productos.map(p => `<div onclick="abrirEditarProducto('${p.id}')" class="card" style="display:flex;align-items:center;gap:12px;padding:12px 14px;margin-bottom:9px;cursor:pointer">
+        <div style="width:46px;height:46px;border-radius:13px;background:${p.color||'#eee'}33;display:flex;align-items:center;justify-content:center;font-size:21px;flex-shrink:0">${p.emoji||'📦'}</div>
+        <div style="flex:1;min-width:0"><div style="font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.nombre}</div>${p.controla_stock?`<span style="font-size:11px;font-weight:700;color:${p.stock<=p.stock_minimo?'var(--warn)':'var(--ink-500)'}">${p.stock} u.</span>`:''}</div>
+        <div style="font-size:15px;font-weight:800;color:${A}">${f$(p.precio)}</div>
+      </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+const EMOJIS = ['📦','🛒','🍎','🥤','🍫','🧴','🧼','👕','👟','📱','💡','🔧','✏️','🥩','🍞','☕','🍕','🧃'];
+const COLORES = ['#B5D4F4','#9FE1CB','#FAC775','#F4C0D1','#C0DD97','#F5C4B3','#CECBF6','#85B7EB'];
+
+window.abrirNuevoProducto = function(){
+  S.prodForm = { id:null, nombre:'', precio:'', emoji:'📦', color:'#B5D4F4', controla_stock:false, stock:'0', stock_minimo:'5', categoria_id: S.categorias[0]?.id||null };
+  R();
+};
+window.abrirEditarProducto = function(pid){
+  const p = S.productos.find(x=>x.id===pid);
+  S.prodForm = { id:p.id, nombre:p.nombre, precio:String(p.precio), emoji:p.emoji||'📦', color:p.color||'#B5D4F4', controla_stock:p.controla_stock, stock:String(p.stock||0), stock_minimo:String(p.stock_minimo||5), categoria_id:p.categoria_id };
+  R();
+};
+
+function renderProductoForm(back){
+  const f = S.prodForm; const isEdit = !!f.id;
+  return `<div style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+    ${header(isEdit?'Editar artículo':'Nuevo artículo', { back: "S.prodForm=null;R()", right: isEdit?`<button onclick="eliminarProductoUI('${f.id}')" style="font-size:13px;font-weight:700;color:var(--danger);background:none;border:none">Eliminar</button>`:'' })}
+    <div style="flex:1;overflow-y:auto;padding:14px var(--sp-4)">
+      <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:10px">
+        <div style="width:50px;height:50px;border-radius:14px;background:${f.color}33;display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0">${f.emoji}</div>
+        <div style="flex:1;display:grid;grid-template-columns:repeat(6,1fr);gap:4px">
+          ${EMOJIS.map(e=>`<div onclick="S.prodForm.emoji='${e}';R()" style="height:32px;border-radius:8px;border:2px solid ${f.emoji===e?A:'var(--ink-100)'};display:flex;align-items:center;justify-content:center;font-size:16px;cursor:pointer">${e}</div>`).join('')}
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:5px;margin-bottom:16px">
+        ${COLORES.map(c=>`<div onclick="S.prodForm.color='${c}';R()" style="height:26px;border-radius:7px;background:${c};cursor:pointer;border:${f.color===c?'2.5px solid var(--ink-900)':'none'}"></div>`).join('')}
+      </div>
+      <div class="field"><label class="lbl">Nombre *</label><input id="pf-nombre" value="${f.nombre}" oninput="S.prodForm.nombre=this.value" placeholder="Nombre del producto"></div>
+      <div class="field"><label class="lbl">Precio *</label><input id="pf-precio" type="number" value="${f.precio}" oninput="S.prodForm.precio=this.value" placeholder="0" style="font-size:18px;font-weight:700"></div>
+      <div onclick="S.prodForm.controla_stock=!S.prodForm.controla_stock;R()" style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px;background:var(--ink-100);border-radius:var(--r-md);margin-bottom:10px;cursor:pointer">
+        <span style="font-size:14px;font-weight:700">Controlar stock</span>
+        <div style="width:40px;height:22px;border-radius:99px;background:${f.controla_stock?A:'var(--ink-300)'};position:relative"><div style="position:absolute;width:16px;height:16px;border-radius:50%;background:#fff;top:3px;left:${f.controla_stock?21:3}px;transition:left .15s"></div></div>
+      </div>
+      ${f.controla_stock?`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <div><label class="lbl">Stock</label><input id="pf-stock" type="number" value="${f.stock}" oninput="S.prodForm.stock=this.value" placeholder="0"></div>
+        <div><label class="lbl">Alerta mínima</label><input id="pf-min" type="number" value="${f.stock_minimo}" oninput="S.prodForm.stock_minimo=this.value" placeholder="5"></div>
+      </div>`:''}
+      <button class="btn-primary" style="margin-top:10px" onclick="guardarProducto()">${isEdit?'Guardar cambios':'Agregar artículo'}</button>
+    </div>
+  </div>`;
+}
+
+window.guardarProducto = async function(){
+  const f = S.prodForm;
+  const nombre = document.getElementById('pf-nombre').value.trim();
+  const precio = parseFloat(document.getElementById('pf-precio').value) || 0;
+  if(!nombre || !precio){ alert('Completá nombre y precio.'); return; }
+  const campos = {
+    nombre, precio, emoji: f.emoji, color: f.color, categoria_id: f.categoria_id,
+    controla_stock: f.controla_stock,
+    stock: f.controla_stock ? (parseFloat(document.getElementById('pf-stock').value)||0) : 0,
+    stock_minimo: f.controla_stock ? (parseFloat(document.getElementById('pf-min').value)||5) : 5,
+  };
+  if(f.id){
+    const { data } = await DB.actualizarProducto(f.id, campos);
+    S.productos = S.productos.map(p=>p.id===f.id?data:p);
+  } else {
+    const { data } = await DB.crearProducto(S.negocio.id, campos);
+    if(data) S.productos.push(data);
+  }
+  S.prodForm = null;
+  R();
+};
+window.eliminarProductoUI = async function(pid){
+  if(!confirm('¿Eliminar este artículo?')) return;
+  await DB.eliminarProducto(pid);
+  S.productos = S.productos.filter(p=>p.id!==pid);
+  S.prodForm = null;
+  R();
+};
+
+// ════════════════════════════════════════════════════════════
+// CLIENTES
+// ════════════════════════════════════════════════════════════
+function renderClientesScreen(back){
+  if(S.clienteForm) return renderClienteForm(back);
+  if(S.clienteSel) return renderClienteDetalle(back);
+  return `<div style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+    ${header('Clientes', { back, right: `<button onclick="S.clienteForm={id:null,nombre:'',telefono:''};R()" style="width:36px;height:36px;border-radius:99px;background:${A};border:none;color:#fff;font-size:17px"><i class="ti ti-plus"></i></button>` })}
+    <div style="flex:1;overflow-y:auto;padding:12px var(--sp-4)">
+      ${!S.clientes.length?`<div style="text-align:center;padding:40px;color:var(--ink-500)"><i class="ti ti-users" style="font-size:36px;display:block;margin-bottom:10px"></i><p style="font-size:13px">Tocá + para agregar un cliente.</p></div>`
+      : S.clientes.map(c=>`<div onclick="verCliente('${c.id}')" class="card" style="display:flex;align-items:center;gap:12px;padding:13px 14px;margin-bottom:9px;cursor:pointer">
+        <div style="width:42px;height:42px;border-radius:50%;background:var(--brand-soft);color:${A};display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800">${c.nombre.charAt(0).toUpperCase()}</div>
+        <div style="flex:1;min-width:0"><div style="font-size:15px;font-weight:700">${c.nombre}</div><div style="font-size:12px;color:var(--ink-500);font-weight:600">${c.telefono||''}</div></div>
+        <i class="ti ti-chevron-right" style="color:var(--ink-300)"></i>
+      </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+window.verCliente = async function(cid){
+  S.clienteSel = cid;
+  S.clienteSaldo = await DB.saldoCliente(cid);
+  S.clienteMovs = await DB.movimientosCliente(cid);
+  R();
+};
+
+function renderClienteDetalle(back){
+  const c = S.clientes.find(x=>x.id===S.clienteSel);
+  const saldo = S.clienteSaldo || 0;
+  return `<div style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+    ${header(c.nombre, { back: "S.clienteSel=null;R()" })}
+    <div style="flex:1;overflow-y:auto;padding:14px var(--sp-4)">
+      <div style="background:${saldo<0?'var(--danger-soft)':'var(--money-soft)'};border-radius:var(--r-md);padding:15px 16px;margin-bottom:16px">
+        <div style="font-size:12px;color:${saldo<0?'var(--danger)':'var(--money-deep)'};font-weight:700">Cuenta corriente</div>
+        <div style="font-size:26px;font-weight:800;color:${saldo<0?'var(--danger)':'var(--money-deep)'}">${saldo<0?'−':'+'}${f$(Math.abs(saldo))}</div>
+      </div>
+      <div style="font-size:12px;font-weight:700;color:var(--ink-500);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Movimientos</div>
+      ${!S.clienteMovs?.length?`<p style="font-size:13px;color:var(--ink-500)">Sin movimientos.</p>`
+      :S.clienteMovs.map(m=>`<div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--ink-100)"><span style="font-size:13px;color:var(--ink-700)">${m.descripcion||m.tipo}</span><span style="font-size:14px;font-weight:700;color:${m.monto>0?'var(--money-deep)':'var(--danger)'}">${m.monto>0?'+':''}${f$(m.monto)}</span></div>`).join('')}
+    </div>
+  </div>`;
+}
+
+function renderClienteForm(back){
+  const f = S.clienteForm;
+  return `<div style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+    ${header('Nuevo cliente', { back: "S.clienteForm=null;R()" })}
+    <div style="flex:1;overflow-y:auto;padding:14px var(--sp-4)">
+      <div class="field"><label class="lbl">Nombre *</label><input id="cf-nombre" value="${f.nombre}" oninput="S.clienteForm.nombre=this.value" placeholder="Nombre completo"></div>
+      <div class="field"><label class="lbl">Teléfono</label><input id="cf-tel" value="${f.telefono}" oninput="S.clienteForm.telefono=this.value" placeholder="3757-..."></div>
+      <button class="btn-primary" onclick="guardarCliente()">Agregar cliente</button>
+    </div>
+  </div>`;
+}
+window.guardarCliente = async function(){
+  const nombre = document.getElementById('cf-nombre').value.trim();
+  if(!nombre){ alert('Ingresá un nombre.'); return; }
+  const telefono = document.getElementById('cf-tel').value.trim();
+  const { data } = await DB.crearCliente(S.negocio.id, { nombre, telefono });
+  if(data) S.clientes.push(data);
+  S.clienteForm = null;
+  R();
+};
+
+// ════════════════════════════════════════════════════════════
+// EMPLEADOS
+// ════════════════════════════════════════════════════════════
+function renderEmpleadosScreen(back){
+  if(S.empForm) return renderEmpForm(back);
+  return `<div style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+    ${header('Empleados', { back, right: `<button onclick="S.empForm={nombre:'',pin:'',rol:'cajero'};R()" style="width:36px;height:36px;border-radius:99px;background:${A};border:none;color:#fff;font-size:17px"><i class="ti ti-plus"></i></button>` })}
+    <div style="flex:1;overflow-y:auto;padding:12px var(--sp-4)">
+      ${!S.empleados.length?`<div style="text-align:center;padding:40px;color:var(--ink-500)"><i class="ti ti-users" style="font-size:36px;display:block;margin-bottom:10px"></i><p style="font-size:13px">Tocá + para agregar empleados con acceso por PIN.</p></div>`
+      :S.empleados.map(e=>`<div class="card" style="display:flex;align-items:center;gap:12px;padding:13px 14px;margin-bottom:9px">
+        <div style="width:42px;height:42px;border-radius:50%;background:var(--brand-soft);color:${A};display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800">${e.nombre.charAt(0).toUpperCase()}</div>
+        <div style="flex:1"><div style="font-size:15px;font-weight:700">${e.nombre}</div><div style="font-size:12px;color:var(--ink-500);font-weight:600">${rolLabel(e.rol)}</div></div>
+        <button onclick="eliminarEmpleadoUI('${e.id}')" style="background:none;border:none;color:var(--danger);font-size:18px"><i class="ti ti-trash"></i></button>
+      </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+function renderEmpForm(back){
+  const f = S.empForm;
+  const roles = [['cajero','Cajero','Vende y cobra'],['mesero','Mesero','Solo toma pedidos']];
+  return `<div style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+    ${header('Nuevo empleado', { back: "S.empForm=null;R()" })}
+    <div style="flex:1;overflow-y:auto;padding:14px var(--sp-4)">
+      <div class="field"><label class="lbl">Nombre *</label><input id="ef-nombre" value="${f.nombre}" oninput="S.empForm.nombre=this.value" placeholder="Nombre"></div>
+      <div class="field"><label class="lbl">PIN de 4 dígitos *</label><input id="ef-pin" type="number" maxlength="4" value="${f.pin}" oninput="S.empForm.pin=this.value" placeholder="1234" style="font-size:20px;font-weight:700;letter-spacing:4px"></div>
+      <label class="lbl" style="margin-bottom:8px">Rol</label>
+      ${roles.map(([id,l,d])=>`<div onclick="S.empForm.rol='${id}';R()" style="display:flex;align-items:center;gap:11px;padding:13px;border-radius:var(--r-md);border:2px solid ${f.rol===id?A:'var(--ink-100)'};background:${f.rol===id?'var(--brand-soft)':'#fff'};margin-bottom:8px;cursor:pointer">
+        <div style="flex:1"><div style="font-size:14px;font-weight:700;color:${f.rol===id?'var(--brand-deep)':'var(--ink-900)'}">${l}</div><div style="font-size:12px;color:var(--ink-500)">${d}</div></div>
+        ${f.rol===id?`<i class="ti ti-check" style="color:${A}"></i>`:''}
+      </div>`).join('')}
+      <button class="btn-primary" style="margin-top:10px" onclick="guardarEmpleado()">Agregar empleado</button>
+    </div>
+  </div>`;
+}
+window.guardarEmpleado = async function(){
+  const nombre = document.getElementById('ef-nombre').value.trim();
+  const pin = document.getElementById('ef-pin').value.trim();
+  if(!nombre || pin.length!==4){ alert('Completá nombre y un PIN de 4 dígitos.'); return; }
+  const { data, error } = await DB.crearEmpleado(S.negocio.id, nombre, pin, S.empForm.rol);
+  if(error){ alert('Error: '+error.message); return; }
+  S.empleados = await DB.listarEmpleados(S.negocio.id);
+  S.empForm = null;
+  R();
+};
+window.eliminarEmpleadoUI = async function(eid){
+  if(!confirm('¿Eliminar este empleado?')) return;
+  await DB.eliminarEmpleado(eid);
+  S.empleados = S.empleados.filter(e=>e.id!==eid);
+  R();
+};
+
+// ════════════════════════════════════════════════════════════
+// HOOKS POST-RENDER
+// ════════════════════════════════════════════════════════════
+function afterRender(){
+  if(S.tab === 'caja' && S.turno && !S.prodForm) cargarResumenCaja();
+}
+</script>
+</body>
+</html>
