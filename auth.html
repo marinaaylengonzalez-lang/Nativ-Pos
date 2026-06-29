@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Nativ POS — Acceso</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+:root{
+  --sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:24px;
+  --r-sm:12px;--r-md:18px;--r-lg:24px;--r-pill:99px;
+  --ink-900:#14171f;--ink-700:#4b5160;--ink-500:#969cab;--ink-300:#d6d9e1;--ink-100:#f2f3f6;--ink-0:#fff;
+  --brand:#1a3fa0;--brand-deep:#0d2570;--brand-soft:#eaeefb;
+  --money:#0f9d58;--money-soft:#e6f7ee;
+  --danger:#e0293f;--danger-soft:#fdeaed;
+  --shadow-card:0 1px 2px rgba(20,23,31,.04),0 2px 8px rgba(20,23,31,.06);
+  --shadow-cta:0 10px 24px rgba(26,63,160,.3);
+  --ease:cubic-bezier(.22,.85,.32,1);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Roboto,sans-serif;background:var(--ink-100);color:var(--ink-900);-webkit-font-smoothing:antialiased}
+#app{max-width:430px;margin:0 auto;min-height:100vh;background:var(--ink-100);display:flex;flex-direction:column}
+input{border:1.5px solid var(--ink-300);border-radius:var(--r-sm);padding:14px 16px;width:100%;font-size:16px;background:#fff;color:var(--ink-900);outline:none;transition:border-color .15s}
+input:focus{border-color:var(--brand)}
+.btn-primary{width:100%;padding:16px;background:var(--brand);color:#fff;border:none;border-radius:var(--r-md);font-size:16px;font-weight:800;box-shadow:var(--shadow-cta);display:flex;align-items:center;justify-content:center;gap:8px;transition:transform .1s var(--ease)}
+.btn-primary:active{transform:scale(.98)}
+.btn-primary:disabled{opacity:.5;box-shadow:none}
+.btn-ghost{width:100%;padding:14px;background:none;border:none;color:var(--brand);font-size:15px;font-weight:700}
+.lbl{font-size:13px;color:var(--ink-700);font-weight:700;display:block;margin-bottom:6px}
+.field{margin-bottom:14px}
+.err{background:var(--danger-soft);color:var(--danger);border-radius:var(--r-sm);padding:12px 14px;font-size:13px;font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.spinner{width:18px;height:18px;border:2.5px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+.card-anim{animation:fadeIn .35s var(--ease)}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script type="module">
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './src/supabase-config.js';
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const LOGO_SPLASH = `<svg width="64" height="64" viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="#1a3fa0"/><polygon points="18,80 18,20 30,20 58,56 58,20 72,20 72,80 58,80 30,44 30,80" fill="white"/><polygon points="18,20 30,20 44,42 30,42" fill="#e0293f"/></svg>`;
+
+let U = {
+  mode: 'login',          // 'login' | 'signup' | 'onboarding'
+  email: '', password: '', confirmPassword: '',
+  loading: false, error: '',
+  // onboarding (alta de negocio tras signup)
+  negocioNombre: '', negocioRubro: '',
+};
+
+const RUBROS = [
+  ['kiosco','Kiosco','ti-building-store'],
+  ['restaurante','Restaurante / Bar','ti-tool-kitchen-2'],
+  ['ropa','Ropa / Calzado','ti-hanger'],
+  ['electronica','Electrónica','ti-device-mobile'],
+  ['servicios','Servicios','ti-scissors'],
+  ['otro','Otro','ti-grid-dots'],
+];
+
+function R(){ document.getElementById('app').innerHTML = render(); }
+
+function render(){
+  const header = `
+    <div style="padding:48px 28px 32px;text-align:center">
+      ${LOGO_SPLASH}
+      <div style="font-size:24px;font-weight:900;color:var(--ink-900);margin-top:14px;letter-spacing:-.4px">NATIV <span style="color:#e0293f">POS</span></div>
+      <div style="font-size:13px;color:var(--ink-500);letter-spacing:1.5px;text-transform:uppercase;margin-top:2px;font-weight:700">Sistema de Ventas</div>
+    </div>`;
+
+  let body = '';
+  if (U.mode === 'login') body = renderLogin();
+  else if (U.mode === 'signup') body = renderSignup();
+  else if (U.mode === 'onboarding') body = renderOnboarding();
+
+  return header + `<div style="flex:1;padding:0 24px 32px" class="card-anim">${body}</div>`;
+}
+
+function renderLogin(){
+  return `
+    <h2 style="font-size:20px;font-weight:800;margin-bottom:4px">Bienvenido de vuelta</h2>
+    <p style="font-size:14px;color:var(--ink-500);margin-bottom:22px">Ingresá con tu cuenta de dueño</p>
+    ${U.error ? `<div class="err"><i class="ti ti-alert-circle"></i>${U.error}</div>` : ''}
+    <div class="field"><label class="lbl">Email</label><input id="f-email" type="email" value="${U.email}" placeholder="tu@email.com" autocomplete="email"></div>
+    <div class="field"><label class="lbl">Contraseña</label><input id="f-pass" type="password" value="${U.password}" placeholder="••••••••" autocomplete="current-password"></div>
+    <button class="btn-primary" onclick="doLogin()" ${U.loading?'disabled':''} style="margin-top:6px">
+      ${U.loading ? '<span class="spinner"></span>' : '<i class="ti ti-login-2"></i> Ingresar'}
+    </button>
+    <button class="btn-ghost" onclick="U.mode='signup';U.error='';R()">¿No tenés cuenta? Crear negocio</button>
+  `;
+}
+
+function renderSignup(){
+  return `
+    <h2 style="font-size:20px;font-weight:800;margin-bottom:4px">Creá tu cuenta</h2>
+    <p style="font-size:14px;color:var(--ink-500);margin-bottom:22px">Esta va a ser tu cuenta de dueño</p>
+    ${U.error ? `<div class="err"><i class="ti ti-alert-circle"></i>${U.error}</div>` : ''}
+    <div class="field"><label class="lbl">Email</label><input id="f-email" type="email" value="${U.email}" placeholder="tu@email.com" autocomplete="email"></div>
+    <div class="field"><label class="lbl">Contraseña</label><input id="f-pass" type="password" value="${U.password}" placeholder="Mínimo 6 caracteres" autocomplete="new-password"></div>
+    <div class="field"><label class="lbl">Confirmar contraseña</label><input id="f-pass2" type="password" value="${U.confirmPassword}" placeholder="Repetí la contraseña" autocomplete="new-password"></div>
+    <button class="btn-primary" onclick="doSignup()" ${U.loading?'disabled':''} style="margin-top:6px">
+      ${U.loading ? '<span class="spinner"></span>' : '<i class="ti ti-rocket"></i> Crear cuenta'}
+    </button>
+    <button class="btn-ghost" onclick="U.mode='login';U.error='';R()">Ya tengo cuenta — Ingresar</button>
+  `;
+}
+
+function renderOnboarding(){
+  const rubrosHTML = RUBROS.map(([id,label,icon]) => `
+    <div onclick="U.negocioRubro='${id}';R()" style="display:flex;align-items:center;gap:11px;padding:13px;border-radius:var(--r-md);border:2px solid ${U.negocioRubro===id?'var(--brand)':'var(--ink-100)'};background:${U.negocioRubro===id?'var(--brand-soft)':'#fff'};cursor:pointer;margin-bottom:8px">
+      <i class="ti ${icon}" style="font-size:21px;color:${U.negocioRubro===id?'var(--brand)':'var(--ink-500)'}"></i>
+      <span style="font-size:14px;font-weight:700;color:${U.negocioRubro===id?'var(--brand-deep)':'var(--ink-900)'}">${label}</span>
+      ${U.negocioRubro===id?'<i class="ti ti-check" style="margin-left:auto;color:var(--brand)"></i>':''}
+    </div>`).join('');
+
+  return `
+    <h2 style="font-size:20px;font-weight:800;margin-bottom:4px">Un último paso</h2>
+    <p style="font-size:14px;color:var(--ink-500);margin-bottom:22px">Contanos sobre tu negocio</p>
+    ${U.error ? `<div class="err"><i class="ti ti-alert-circle"></i>${U.error}</div>` : ''}
+    <div class="field"><label class="lbl">Nombre del negocio</label><input id="f-negocio" value="${U.negocioNombre}" placeholder="Ej: Kiosco El Sol"></div>
+    <label class="lbl" style="margin-bottom:10px">Rubro</label>
+    ${rubrosHTML}
+    <button class="btn-primary" onclick="doOnboarding()" ${U.loading?'disabled':''} style="margin-top:10px">
+      ${U.loading ? '<span class="spinner"></span>' : '<i class="ti ti-check"></i> Empezar a vender'}
+    </button>
+  `;
+}
+
+// ── ACCIONES ──────────────────────────────────────────────────
+window.doLogin = async function(){
+  const email = document.getElementById('f-email').value.trim();
+  const password = document.getElementById('f-pass').value;
+  if(!email || !password){ U.error='Completá email y contraseña.'; R(); return; }
+  U.loading = true; U.error=''; R();
+
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  U.loading = false;
+  if(error){
+    U.error = error.message.includes('Invalid login') ? 'Email o contraseña incorrectos.' : error.message;
+    R();
+    return;
+  }
+  await checkNegocioYRedirigir();
+};
+
+window.doSignup = async function(){
+  const email = document.getElementById('f-email').value.trim();
+  const password = document.getElementById('f-pass').value;
+  const password2 = document.getElementById('f-pass2').value;
+  if(!email || !password){ U.error='Completá email y contraseña.'; R(); return; }
+  if(password.length < 6){ U.error='La contraseña debe tener al menos 6 caracteres.'; R(); return; }
+  if(password !== password2){ U.error='Las contraseñas no coinciden.'; R(); return; }
+
+  U.loading = true; U.error=''; R();
+  const { data, error } = await sb.auth.signUp({ email, password });
+  U.loading = false;
+
+  if(error){
+    U.error = error.message.includes('already registered') ? 'Ya existe una cuenta con ese email.' : error.message;
+    R();
+    return;
+  }
+  // Pasa a completar datos del negocio
+  U.mode = 'onboarding';
+  R();
+};
+
+window.doOnboarding = async function(){
+  const nombre = document.getElementById('f-negocio').value.trim();
+  if(!nombre){ U.error='Ingresá el nombre de tu negocio.'; R(); return; }
+  if(!U.negocioRubro){ U.error='Elegí un rubro.'; R(); return; }
+
+  U.loading = true; U.error=''; R();
+
+  const { data: userData } = await sb.auth.getUser();
+  const ownerId = userData?.user?.id;
+
+  const { data, error } = await sb.from('negocios').insert({
+    owner_id: ownerId,
+    nombre: nombre,
+    rubro: U.negocioRubro,
+  }).select().single();
+
+  U.loading = false;
+  if(error){
+    U.error = 'No se pudo crear el negocio: ' + error.message;
+    R();
+    return;
+  }
+  // Listo: redirigir a la app principal
+  window.location.href = './index.html';
+};
+
+async function checkNegocioYRedirigir(){
+  const { data: userData } = await sb.auth.getUser();
+  const ownerId = userData?.user?.id;
+  const { data: negocios } = await sb.from('negocios').select('id').eq('owner_id', ownerId).limit(1);
+
+  if(negocios && negocios.length > 0){
+    window.location.href = './index.html';
+  } else {
+    U.mode = 'onboarding';
+    R();
+  }
+}
+
+// Si ya hay sesión activa, saltar directo
+(async () => {
+  const { data } = await sb.auth.getSession();
+  if(data?.session){
+    await checkNegocioYRedirigir();
+  } else {
+    R();
+  }
+})();
+</script>
+</body>
+</html>
