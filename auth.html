@@ -51,7 +51,7 @@ let U = window.U = {
   email: '', password: '', confirmPassword: '',
   loading: false, error: '',
   // onboarding (alta de negocio tras signup)
-  negocioNombre: '', negocioRubro: '',
+  negocioNombre: '', negocioRubro: '', nombreDueno: '',
 };
 
 const RUBROS = [
@@ -143,7 +143,8 @@ function renderOnboarding(){
     <h2 style="font-size:20px;font-weight:800;margin-bottom:4px">Un último paso</h2>
     <p style="font-size:14px;color:var(--ink-500);margin-bottom:22px">Contanos sobre tu negocio</p>
     ${U.error ? `<div class="err"><i class="ti ti-alert-circle"></i>${U.error}</div>` : ''}
-    <div class="field"><label class="lbl">Nombre del negocio</label><input id="f-negocio" value="${U.negocioNombre}" placeholder="Ej: Kiosco El Sol"></div>
+    <div class="field"><label class="lbl">Tu nombre *</label><input id="f-dueno" value="${U.nombreDueno}" oninput="U.nombreDueno=this.value" placeholder="Ej: Juan García"></div>
+    <div class="field"><label class="lbl">Nombre del negocio *</label><input id="f-negocio" value="${U.negocioNombre}" placeholder="Ej: Kiosco El Sol"></div>
     <label class="lbl" style="margin-bottom:10px">Rubro</label>
     ${rubrosHTML}
     <button class="btn-primary" onclick="doOnboarding()" ${U.loading?'disabled':''} style="margin-top:10px">
@@ -210,23 +211,16 @@ window.doSignup = async function(){
 };
 
 window.doOnboarding = async function(){
+  const nombreDueno = document.getElementById('f-dueno')?.value.trim() || U.nombreDueno;
   const nombre = document.getElementById('f-negocio').value.trim();
+  if(!nombreDueno){ U.error='Ingresá tu nombre.'; R(); return; }
   if(!nombre){ U.error='Ingresá el nombre de tu negocio.'; R(); return; }
   if(!U.negocioRubro){ U.error='Elegí un rubro.'; R(); return; }
 
   U.loading = true; U.error=''; R();
 
-  // Diagnóstico: confirmamos que hay sesión activa antes de insertar
-  const { data: sessionData, error: sessionError } = await sb.auth.getSession();
-  console.log('[Nativ POS] sesión actual:', sessionData?.session);
-  console.log('[Nativ POS] sessionError:', sessionError);
-
-  const { data: userData, error: userError } = await sb.auth.getUser();
-  console.log('[Nativ POS] userData:', userData);
-  console.log('[Nativ POS] userError:', userError);
-
+  const { data: userData } = await sb.auth.getUser();
   const ownerId = userData?.user?.id;
-  console.log('[Nativ POS] ownerId a insertar:', ownerId);
 
   if(!ownerId){
     U.loading = false;
@@ -239,9 +233,8 @@ window.doOnboarding = async function(){
     owner_id: ownerId,
     nombre: nombre,
     rubro: U.negocioRubro,
+    nombre_dueno: nombreDueno,
   }).select().single();
-
-  console.log('[Nativ POS] resultado insert:', { data, error });
 
   U.loading = false;
   if(error){
@@ -249,7 +242,6 @@ window.doOnboarding = async function(){
     R();
     return;
   }
-  // Listo: redirigir a la app principal
   window.location.href = './index.html';
 };
 

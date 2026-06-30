@@ -42,6 +42,7 @@ button{font-family:inherit;cursor:pointer}
 @keyframes spin{to{transform:rotate(360deg)}}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 @keyframes pop{from{transform:scale(0)}to{transform:scale(1)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
 .fade{animation:fadeIn .2s var(--ease)}
 .center-screen{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px}
 /* Scrollbars ocultos en mobile look */
@@ -80,6 +81,8 @@ let S = window.S = {
 
   tab: 'vender',           // vender | mesas | caja | mas
   masScreen: null,         // null = menú "más" | 'productos' | 'clientes' | 'reportes' | 'finanzas' | 'config' | 'empleados'
+  itemsListos: {},         // { mesaId: count } — items marcados listos por cocina
+  pollTimer: null,         // referencia al setInterval de polling
 
   // PIN
   pinSel: null, pinBuffer: '', pinError: '',
@@ -101,37 +104,91 @@ window.R = R;
 const f$ = n => '$' + (Math.round(n) || 0).toLocaleString('es-AR');
 
 // ── BOOT ──────────────────────────────────────────────────────
+// ── SONIDO Y POLLING (mesero) ────────────────────────────────
+function sonarAlerta(){
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [660, 880].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = freq;
+      osc.type = 'sine';
+      const t = ctx.currentTime + i * 0.18;
+      gain.gain.setValueAtTime(0.3, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+      osc.start(t); osc.stop(t + 0.3);
+    });
+  } catch(e){}
+}
+
+async function pollItemsListos(){
+  if(!S.negocio || !S.turno) return;
+  try {
+    const { data } = await DB.sb.from('pedidos_mesa')
+      .select('mesa_id, estado')
+      .eq('negocio_id', S.negocio.id)
+      .eq('estado', 'listo');
+
+    const conteo = {};
+    (data || []).forEach(p => { conteo[p.mesa_id] = (conteo[p.mesa_id] || 0) + 1; });
+
+    // Detectar si apareció algo nuevo que antes no estaba
+    const hayNuevo = Object.entries(conteo).some(([mid, cnt]) => (S.itemsListos[mid] || 0) < cnt);
+    if(hayNuevo) sonarAlerta();
+
+    const cambio = JSON.stringify(conteo) !== JSON.stringify(S.itemsListos);
+    S.itemsListos = conteo;
+    if(cambio && S.tab === 'mesas') R(); // solo re-render si estamos en la pantalla de mesas
+  } catch(e){}
+}
+
 async function boot(){
-  const user = await DB.getSessionUser();
-  if(!user){ window.location.href = './auth.html'; return; }
+  try {
+    const user = await DB.getSessionUser();
+    if(!user){ window.location.href = './auth.html'; return; }
 
-  const negocio = await DB.getMiNegocio();
-  if(!negocio){ window.location.href = './auth.html'; return; }
-  S.negocio = negocio;
+    const negocio = await DB.getMiNegocio();
+    if(!negocio){ window.location.href = './auth.html'; return; }
+    S.negocio = negocio;
 
-  const [empleados, productos, categorias, clientes, mesas, turno] = await Promise.all([
-    DB.listarEmpleados(negocio.id),
-    DB.listarProductos(negocio.id),
-    DB.listarCategorias(negocio.id),
-    DB.listarClientes(negocio.id),
-    DB.listarMesas(negocio.id),
-    DB.turnoAbierto(negocio.id),
-  ]);
-  S.empleados = empleados;
-  S.productos = productos;
-  S.categorias = categorias.length ? categorias : [{ id: null, nombre: 'General', color: '#B5D4F4' }];
-  S.clientes = clientes;
-  S.mesas = mesas;
-  S.turno = turno;
+    const [empleados, productos, categorias, clientes, mesas, turno] = await Promise.all([
+      DB.listarEmpleados(negocio.id),
+      DB.listarProductos(negocio.id),
+      DB.listarCategorias(negocio.id),
+      DB.listarClientes(negocio.id),
+      DB.listarMesas(negocio.id),
+      DB.turnoAbierto(negocio.id),
+    ]);
+    S.empleados = empleados;
+    S.productos = productos;
+    S.categorias = categorias.length ? categorias : [{ id: null, nombre: 'General', color: '#B5D4F4' }];
+    S.clientes = clientes;
+    S.mesas = mesas;
+    S.turno = turno;
 
-  // Si todavía no hay empleados con PIN creados, el dueño entra directo
-  // (es el único que puede operar, no tiene sentido pedirle un PIN a sí mismo).
-  if(empleados.length === 0){
-    S.empleadoActivo = { id: null, nombre: 'Dueño', rol: 'dueno' };
+    // Si no hay empleados creados, el dueño entra directo sin PIN.
+    if(empleados.length === 0){
+      S.empleadoActivo = {
+        id: null,
+        nombre: negocio.nombre_dueno || 'Dueño',
+        rol: 'dueno'
+      };
+    }
+
+    S.loading = false;
+    R();
+
+    // Arrancar polling de items listos (para que el mesero vea alertas)
+    if(S.pollTimer) clearInterval(S.pollTimer);
+    S.pollTimer = setInterval(pollItemsListos, 15000);
+
+  } catch(e) {
+    console.error('[Nativ POS] Error en boot:', e);
+    S.loading = false;
+    S.error = 'Error al cargar: ' + e.message;
+    R();
   }
-
-  S.loading = false;
-  R();
 }
 
 boot();
@@ -154,6 +211,10 @@ function render(){
 }
 
 function renderLoading(){
+  if(S.error) return `<div class="center-screen">${LOGO_BIG}
+    <div style="margin-top:16px;font-size:13px;color:var(--danger);font-weight:700;text-align:center;max-width:280px">${S.error}</div>
+    <button onclick="window.location.reload()" style="margin-top:16px;padding:10px 20px;background:var(--brand);color:#fff;border:none;border-radius:99px;font-size:13px;font-weight:700">Reintentar</button>
+  </div>`;
   return `<div class="center-screen">${LOGO_BIG}<div style="margin-top:16px;font-size:14px;color:var(--ink-500);font-weight:700">Cargando Nativ POS...</div></div>`;
 }
 
@@ -243,7 +304,7 @@ function renderAbrirTurno(){
     <div style="font-size:13px;color:var(--ink-500);margin-bottom:24px">${S.negocio.nombre} · ${S.empleadoActivo?.nombre}</div>
     <div class="field" style="width:100%">
       <label class="lbl">Efectivo en caja al inicio</label>
-      <input id="at-monto" type="number" placeholder="$0" style="font-size:20px;font-weight:700">
+      <input id="at-monto" type="text" inputmode="decimal" placeholder="$0" style="font-size:20px;font-weight:700">
     </div>
     <button class="btn-primary" onclick="doAbrirTurno()"><i class="ti ti-clock-play"></i> Abrir turno</button>
   </div>`;
@@ -415,7 +476,7 @@ function sheetCart(){
       <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--ink-700);font-weight:600;margin-bottom:6px"><span>Subtotal</span><span>${f$(cartSub())}</span></div>
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
         <span style="font-size:13px;color:var(--ink-700);font-weight:600">Descuento %</span>
-        <input type="number" value="${S.disc||''}" oninput="S.disc=parseFloat(this.value)||0;R()" placeholder="0" style="width:60px;padding:6px 8px;font-size:13px;text-align:center">
+        <input type="text" inputmode="decimal" value="${S.disc||''}" oninput="S.disc=parseFloat(this.value)||0;R()" placeholder="0" style="width:60px;padding:6px 8px;font-size:13px;text-align:center">
         ${discAmt()>0?`<span style="font-size:12px;color:var(--danger);font-weight:700;margin-left:auto">−${f$(discAmt())}</span>`:''}
       </div>
       <div style="display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid var(--ink-300);padding-top:8px;margin-top:6px">
@@ -497,7 +558,7 @@ function sheetCheckoutConfirm(){
     <div style="text-align:center;margin-bottom:16px"><div style="font-size:12px;color:var(--ink-500);font-weight:700">Total</div><div style="font-size:36px;font-weight:800">${f$(cartTotal())}</div></div>
     ${S.pm==='efectivo' ? `
       <label class="lbl">Efectivo recibido</label>
-      <input id="ck-cash" type="number" value="${S.cash}" oninput="S.cash=this.value;updVuelto()" placeholder="${cartTotal()}" style="font-size:22px;font-weight:800;margin-bottom:10px">
+      <input id="ck-cash" type="text" inputmode="decimal" value="${S.cash}" oninput="S.cash=this.value;updVuelto()" placeholder="${cartTotal()}" style="font-size:22px;font-weight:800;margin-bottom:10px">
       <div style="display:flex;gap:8px;margin-bottom:12px">
         ${[cartTotal(), Math.ceil(cartTotal()/1000)*1000, Math.ceil(cartTotal()/5000)*5000].filter((v,i,a)=>a.indexOf(v)===i).map(v=>`<button onclick="document.getElementById('ck-cash').value=${v};S.cash='${v}';updVuelto()" style="flex:1;padding:9px;border-radius:var(--r-sm);background:var(--ink-100);border:none;font-size:12px;font-weight:700;color:var(--ink-700)">${f$(v)}</button>`).join('')}
       </div>
@@ -585,10 +646,13 @@ function renderMesas(){
         ${enZona.map(m => {
           const colors = { libre:{bg:'#fff',bd:'var(--ink-300)',dash:true}, ocupada:{bg:'var(--brand-soft)',bd:A,dash:false}, lista:{bg:'var(--money-soft)',bd:MONEY,dash:false} };
           const c = colors[m.estado] || colors.libre;
+          const itemsListos = S.itemsListos[m.id] || 0;
           return `<div onclick="abrirMesa('${m.id}')" class="card" style="aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;background:${c.bg};border:${c.dash?'2px dashed '+c.bd:'2px solid '+c.bd};position:relative;cursor:pointer">
             ${!c.dash ? `<span style="position:absolute;top:8px;right:8px;width:8px;height:8px;border-radius:50%;background:${c.bd}"></span>` : ''}
+            ${itemsListos > 0 ? `<span style="position:absolute;top:-5px;left:-5px;width:20px;height:20px;border-radius:50%;background:var(--money);color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2px solid #fff;animation:pulse 1.5s infinite">${itemsListos}</span>` : ''}
             <div style="font-size:15px;font-weight:800">${m.nombre}</div>
             <div style="font-size:11px;color:var(--ink-500);font-weight:600"><i class="ti ti-users" style="font-size:10px"></i> ${m.capacidad}</div>
+            ${itemsListos > 0 ? `<div style="font-size:10px;font-weight:800;color:var(--money);margin-top:3px">¡Listo!</div>` : ''}
           </div>`;
         }).join('')}
       </div>`}
@@ -693,7 +757,7 @@ function sheetCobrarMesa(total){
       </div>`).join('')}
     </div>
     ${S.mesaPM==='efectivo'?`
-      <input id="mc-cash" type="number" value="${S.mesaCash}" oninput="S.mesaCash=this.value;R()" placeholder="${total}" style="font-size:20px;font-weight:800;margin-bottom:10px">
+      <input id="mc-cash" type="text" inputmode="decimal" value="${S.mesaCash}" oninput="S.mesaCash=this.value;R()" placeholder="${total}" style="font-size:20px;font-weight:800;margin-bottom:10px">
       ${vuelto>0?`<div style="background:var(--money-soft);border-radius:var(--r-md);padding:12px 14px;display:flex;justify-content:space-between;margin-bottom:12px"><span style="color:var(--money-deep);font-weight:700;font-size:13px">Vuelto</span><span style="font-size:18px;font-weight:800;color:var(--money-deep)">${f$(vuelto)}</span></div>`:''}
     `:''}
     <button class="btn-money" onclick="confirmarCobroMesa(${total})"><i class="ti ti-check"></i> Confirmar cobro</button>
@@ -759,7 +823,7 @@ function sheetCerrarTurno(){
       <span style="font-size:13px;color:var(--ink-700);font-weight:600">Efectivo esperado</span><span style="font-size:14px;font-weight:800">${f$(S._efectivoEsperado||0)}</span>
     </div>
     <label class="lbl">Efectivo contado</label>
-    <input id="ct-monto" type="number" placeholder="$0" oninput="updDiferencia()" style="font-size:20px;font-weight:800;margin-bottom:10px">
+    <input id="ct-monto" type="text" inputmode="decimal" placeholder="$0" oninput="updDiferencia()" style="font-size:20px;font-weight:800;margin-bottom:10px">
     <div id="dif-box" style="margin-bottom:14px"></div>
     <button class="btn-danger-ghost" onclick="doCerrarTurno()">Confirmar cierre</button>
   `);
@@ -863,14 +927,14 @@ function renderProductoForm(back){
         ${COLORES.map(c=>`<div onclick="S.prodForm.color='${c}';R()" style="height:26px;border-radius:7px;background:${c};cursor:pointer;border:${f.color===c?'2.5px solid var(--ink-900)':'none'}"></div>`).join('')}
       </div>
       <div class="field"><label class="lbl">Nombre *</label><input id="pf-nombre" value="${f.nombre}" oninput="S.prodForm.nombre=this.value" placeholder="Nombre del producto"></div>
-      <div class="field"><label class="lbl">Precio *</label><input id="pf-precio" type="number" value="${f.precio}" oninput="S.prodForm.precio=this.value" placeholder="0" style="font-size:18px;font-weight:700"></div>
+      <div class="field"><label class="lbl">Precio *</label><input id="pf-precio" type="text" inputmode="decimal" value="${f.precio}" oninput="S.prodForm.precio=this.value" placeholder="0" style="font-size:18px;font-weight:700"></div>
       <div onclick="S.prodForm.controla_stock=!S.prodForm.controla_stock;R()" style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px;background:var(--ink-100);border-radius:var(--r-md);margin-bottom:10px;cursor:pointer">
         <span style="font-size:14px;font-weight:700">Controlar stock</span>
         <div style="width:40px;height:22px;border-radius:99px;background:${f.controla_stock?A:'var(--ink-300)'};position:relative"><div style="position:absolute;width:16px;height:16px;border-radius:50%;background:#fff;top:3px;left:${f.controla_stock?21:3}px;transition:left .15s"></div></div>
       </div>
       ${f.controla_stock?`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
-        <div><label class="lbl">Stock</label><input id="pf-stock" type="number" value="${f.stock}" oninput="S.prodForm.stock=this.value" placeholder="0"></div>
-        <div><label class="lbl">Alerta mínima</label><input id="pf-min" type="number" value="${f.stock_minimo}" oninput="S.prodForm.stock_minimo=this.value" placeholder="5"></div>
+        <div><label class="lbl">Stock</label><input id="pf-stock" type="text" inputmode="numeric" value="${f.stock}" oninput="S.prodForm.stock=this.value" placeholder="0"></div>
+        <div><label class="lbl">Alerta mínima</label><input id="pf-min" type="text" inputmode="numeric" value="${f.stock_minimo}" oninput="S.prodForm.stock_minimo=this.value" placeholder="5"></div>
       </div>`:''}
       <button class="btn-primary" style="margin-top:10px" onclick="guardarProducto()">${isEdit?'Guardar cambios':'Agregar artículo'}</button>
     </div>
@@ -995,7 +1059,7 @@ function renderEmpForm(back){
     ${header('Nuevo empleado', { back: "S.empForm=null;R()" })}
     <div style="flex:1;overflow-y:auto;padding:14px var(--sp-4)">
       <div class="field"><label class="lbl">Nombre *</label><input id="ef-nombre" value="${f.nombre}" oninput="S.empForm.nombre=this.value" placeholder="Nombre"></div>
-      <div class="field"><label class="lbl">PIN de 4 dígitos *</label><input id="ef-pin" type="number" maxlength="4" value="${f.pin}" oninput="S.empForm.pin=this.value" placeholder="1234" style="font-size:20px;font-weight:700;letter-spacing:4px"></div>
+      <div class="field"><label class="lbl">PIN de 4 dígitos *</label><input id="ef-pin" type="text" inputmode="numeric" maxlength="4" value="${f.pin}" oninput="S.empForm.pin=this.value" placeholder="1234" style="font-size:20px;font-weight:700;letter-spacing:4px"></div>
       <label class="lbl" style="margin-bottom:8px">Rol</label>
       ${roles.map(([id,l,d])=>`<div onclick="S.empForm.rol='${id}';R()" style="display:flex;align-items:center;gap:11px;padding:13px;border-radius:var(--r-md);border:2px solid ${f.rol===id?A:'var(--ink-100)'};background:${f.rol===id?'var(--brand-soft)':'#fff'};margin-bottom:8px;cursor:pointer">
         <div style="flex:1"><div style="font-size:14px;font-weight:700;color:${f.rol===id?'var(--brand-deep)':'var(--ink-900)'}">${l}</div><div style="font-size:12px;color:var(--ink-500)">${d}</div></div>
