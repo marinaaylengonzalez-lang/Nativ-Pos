@@ -87,6 +87,7 @@ let S = window.S = {
   tab: 'vender',           // vender | mesas | caja | mas
   masScreen: null,         // null = menú "más" | 'productos' | 'clientes' | 'reportes' | 'finanzas' | 'config' | 'empleados'
   itemsListos: {},         // { mesaId: count } — items marcados listos por cocina
+  pedidosPorMesa: {},      // { mesaId: [pedidos] } — para calcular color de estado en el mapa
   pollTimer: null,         // referencia al setInterval de polling
 
   // PIN
@@ -131,19 +132,27 @@ async function pollItemsListos(){
   // Solo correr si la app está completamente cargada, hay sesión y hay turno abierto
   if(S.loading || !S.negocio || !S.turno || !S.empleadoActivo) return;
   try {
+    // Traemos TODOS los pedidos activos (pendiente/cocina/listo) para poder
+    // calcular el color real de cada mesa en el mapa, no solo contar "listos".
     const { data } = await DB.sb.from('pedidos_mesa')
       .select('mesa_id, estado')
       .eq('negocio_id', S.negocio.id)
-      .eq('estado', 'listo');
+      .in('estado', ['pendiente','cocina','listo']);
 
+    const porMesa = {};
     const conteo = {};
-    (data || []).forEach(p => { conteo[p.mesa_id] = (conteo[p.mesa_id] || 0) + 1; });
+    (data || []).forEach(p => {
+      if(!porMesa[p.mesa_id]) porMesa[p.mesa_id] = [];
+      porMesa[p.mesa_id].push(p);
+      if(p.estado === 'listo') conteo[p.mesa_id] = (conteo[p.mesa_id] || 0) + 1;
+    });
 
     const hayNuevo = Object.entries(conteo).some(([mid, cnt]) => (S.itemsListos[mid] || 0) < cnt);
     if(hayNuevo) sonarAlerta();
 
-    const cambio = JSON.stringify(conteo) !== JSON.stringify(S.itemsListos);
+    const cambio = JSON.stringify(porMesa) !== JSON.stringify(S.pedidosPorMesa || {});
     S.itemsListos = conteo;
+    S.pedidosPorMesa = porMesa;
     if(cambio && S.tab === 'mesas') R();
   } catch(e){}
 }
@@ -212,6 +221,20 @@ function render(){
   if(S.empleadoActivo.rol === 'cocinero') return renderCocina();
 
   if(!S.turno) return renderAbrirTurno();
+
+  // Protección de rol: un mesero nunca debe poder caer en Vender ni Caja,
+  // sin importar en qué tab haya quedado guardado el estado. Si su rol no
+  // tiene permiso para el tab actual, lo mandamos a Mesas (su pantalla por defecto).
+  const rolActivo = S.empleadoActivo.rol;
+  const tabsPermitidos = {
+    mesero: ['mesas', 'mas'],
+    cajero: ['vender', 'mesas', 'caja', 'mas'],
+    dueno: ['vender', 'mesas', 'caja', 'mas'],
+  };
+  const permitidos = tabsPermitidos[rolActivo] || ['vender','mesas','caja','mas'];
+  if(!permitidos.includes(S.tab)){
+    S.tab = permitidos.includes('mesas') ? 'mesas' : permitidos[0];
+  }
 
   let body = '';
   if(S.tab === 'vender') body = renderVender();
@@ -319,6 +342,8 @@ window.pinPress = async function(d){
     if(result){
       S.empleadoActivo = result;
       S.pinSel = null; S.pinBuffer=''; S.pinError='';
+      // Tab inicial según rol: el mesero arranca en Mesas, no en Vender
+      S.tab = result.rol === 'mesero' ? 'mesas' : 'vender';
       R();
     } else {
       S.pinError = 'PIN incorrecto';
@@ -380,7 +405,11 @@ function renderTabBar(){
   </div>`;
 }
 
-window.goTab = function(tab){ S.tab = tab; S.masScreen = null; S.repData = null; S.finData = null; S.recibosData = null; S.ventaSel = null; R(); };
+window.goTab = function(tab){
+  S.tab = tab; S.masScreen = null; S.repData = null; S.finData = null; S.recibosData = null; S.ventaSel = null;
+  R();
+  if(tab === 'mesas' && S.turno) pollItemsListos(); // refresco inmediato, no esperar el ciclo de 15s
+};
 
 // ════════════════════════════════════════════════════════════
 // HEADER reutilizable
@@ -664,6 +693,16 @@ function sheetSuccess(){
 // ════════════════════════════════════════════════════════════
 // MESAS
 // ════════════════════════════════════════════════════════════
+// Calcula el "color de estado de cocina" de una mesa según sus pedidos activos.
+// Prioridad: listo > cocina > pendiente > (solo ocupada sin pedidos) > libre
+function estadoCocinaMesa(mesaId){
+  const items = (S.pedidosPorMesa && S.pedidosPorMesa[mesaId]) || [];
+  if(!items.length) return null;
+  if(items.some(i=>i.estado==='listo')) return 'listo';
+  if(items.some(i=>i.estado==='cocina')) return 'cocina';
+  return 'pendiente';
+}
+
 function renderMesas(){
   if(S.mesaSel) return renderComanda();
 
@@ -688,18 +727,29 @@ function renderMesas(){
       ${!enZona.length ? `<div style="text-align:center;padding:30px;color:var(--ink-500)"><i class="ti ti-armchair" style="font-size:36px;display:block;margin-bottom:10px"></i><p style="font-size:13px">Sin mesas en ${S.mesaZona}. Tocá + para agregar.</p></div>` : `
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
         ${enZona.map(m => {
-          const colors = { libre:{bg:'#fff',bd:'var(--ink-300)',dash:true}, ocupada:{bg:'var(--brand-soft)',bd:A,dash:false}, lista:{bg:'var(--money-soft)',bd:MONEY,dash:false} };
-          const c = colors[m.estado] || colors.libre;
-          const itemsListos = S.itemsListos[m.id] || 0;
-          return `<div onclick="abrirMesa('${m.id}')" class="card" style="aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;background:${c.bg};border:${c.dash?'2px dashed '+c.bd:'2px solid '+c.bd};position:relative;cursor:pointer">
-            ${!c.dash ? `<span style="position:absolute;top:8px;right:8px;width:8px;height:8px;border-radius:50%;background:${c.bd}"></span>` : ''}
-            ${itemsListos > 0 ? `<span style="position:absolute;top:-5px;left:-5px;width:20px;height:20px;border-radius:50%;background:var(--money);color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2px solid #fff;animation:pulse 1.5s infinite">${itemsListos}</span>` : ''}
-            <div style="font-size:15px;font-weight:800">${m.nombre}</div>
-            <div style="font-size:11px;color:var(--ink-500);font-weight:600"><i class="ti ti-users" style="font-size:10px"></i> ${m.capacidad}</div>
-            ${itemsListos > 0 ? `<div style="font-size:10px;font-weight:800;color:var(--money);margin-top:3px">¡Listo!</div>` : ''}
+          // Sistema de color por estado real de cocina, no solo "ocupada/libre"
+          let bg, bd, dash=false, badge=null, badgeLabel=null;
+          const estCocina = estadoCocinaMesa(m.id);
+
+          if(m.estado === 'lista'){ bg='var(--money-soft)'; bd=MONEY; }
+          else if(m.estado === 'libre'){ bg='#fff'; bd='var(--ink-300)'; dash=true; }
+          else if(estCocina === 'listo'){ bg='var(--money-soft)'; bd=MONEY; badge=MONEY; badgeLabel='¡Listo!'; }
+          else if(estCocina === 'cocina'){ bg='var(--warn-soft)'; bd='var(--warn)'; badge='var(--warn)'; badgeLabel='En cocina'; }
+          else { bg='var(--brand-soft)'; bd=A; } // ocupada, pedido recién tomado o sin estado de cocina
+
+          return `<div onclick="abrirMesa('${m.id}')" class="card" style="aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;background:${bg};border:${dash?'2.5px dashed '+bd:'2.5px solid '+bd};position:relative;cursor:pointer;gap:2px">
+            ${!dash ? `<span style="position:absolute;top:9px;right:9px;width:9px;height:9px;border-radius:50%;background:${bd}"></span>` : ''}
+            ${badge ? `<span style="position:absolute;top:-6px;left:-6px;width:22px;height:22px;border-radius:50%;background:${badge};color:#fff;display:flex;align-items:center;justify-content:center;border:2.5px solid #fff;animation:pulse 1.5s infinite"><i class="ti ${estCocina==='listo'?'ti-check':'ti-flame'}" style="font-size:11px"></i></span>` : ''}
+            <div style="font-size:22px;font-weight:800;line-height:1">${m.nombre}</div>
+            <div style="font-size:12px;color:var(--ink-500);font-weight:700"><i class="ti ti-users" style="font-size:11px"></i> ${m.capacidad}</div>
+            ${badgeLabel ? `<div style="font-size:11px;font-weight:800;color:${badge};margin-top:2px">${badgeLabel}</div>` : ''}
           </div>`;
         }).join('')}
       </div>`}
+    </div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;padding:4px var(--sp-4) 12px;background:var(--ink-100)">
+      ${[['#fff','Libre',true],[A,'Ocupada'],['var(--warn)','En cocina'],[MONEY,'Listo / Para cobrar']].map(([c,l,dash])=>`
+        <div style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:50%;background:${c};border:${dash?'1.5px dashed var(--ink-300)':'1.5px solid '+c}"></span><span style="font-size:11px;color:var(--ink-500);font-weight:600">${l}</span></div>`).join('')}
     </div>
     ${S.mesaForm ? sheetMesaForm() : ''}
   </div>`;
@@ -772,6 +822,22 @@ window.eliminarMesaUI = async function(mid){
 window.abrirMesa = async function(mid){
   S.mesaSel = mid;
   S.mesaPedidos = await DB.listarPedidosMesa(mid);
+
+  // Confirmación implícita de entrega: si el mozo entra a la mesa y hay
+  // items "listo" esperando, se marcan como "servido" automáticamente —
+  // sin pedirle un toque extra. El solo hecho de entrar a revisar la mesa
+  // ya es la señal de que está yendo a atenderla.
+  const listosIds = S.mesaPedidos.filter(p => p.estado === 'listo').map(p => p.id);
+  if(listosIds.length){
+    await DB.sb.from('pedidos_mesa').update({ estado: 'servido' }).in('id', listosIds);
+    S.mesaPedidos = S.mesaPedidos.map(p => listosIds.includes(p.id) ? {...p, estado:'servido'} : p);
+    // Actualizar también el estado local del mapa para que no quede la alerta pegada
+    if(S.pedidosPorMesa && S.pedidosPorMesa[mid]){
+      S.pedidosPorMesa[mid] = S.pedidosPorMesa[mid].filter(p => !listosIds.includes(p.id));
+    }
+    if(S.itemsListos) delete S.itemsListos[mid];
+  }
+
   R();
 };
 
@@ -786,25 +852,38 @@ function renderComanda(){
     <div style="padding:6px var(--sp-4) 0;background:#fff"><span style="font-size:11px;font-weight:700;color:var(--ink-500)">${m.zona} · ${m.estado==='libre'?'Libre':m.estado==='lista'?'Para cobrar':'Ocupada'}</span></div>
     <div style="flex:1;overflow-y:auto;padding:12px var(--sp-4)">
       ${!pedidos.length ? `<div style="text-align:center;padding:40px;color:var(--ink-500)"><i class="ti ti-clipboard-list" style="font-size:36px;display:block;margin-bottom:10px"></i><p style="font-size:13px">Comanda vacía</p></div>`
-      : pedidos.map(p => `<div style="display:flex;align-items:center;gap:11px;padding:11px 0;border-bottom:1px solid var(--ink-100)">
-          <div style="width:30px;text-align:center;font-size:14px;font-weight:800;color:var(--ink-500)">${p.cantidad}×</div>
+      : pedidos.map(p => {
+        // Color por estado real de cocina, para que el mozo sepa de un vistazo
+        // qué se está cocinando y qué ya puede ir a buscar.
+        const estados = {
+          pendiente: { color:'var(--ink-500)', bg:'var(--ink-100)', icon:'ti-clock', label:'Esperando' },
+          cocina: { color:'var(--warn)', bg:'var(--warn-soft)', icon:'ti-flame', label:'En cocina' },
+          listo: { color:MONEY, bg:'var(--money-soft)', icon:'ti-check', label:'¡Listo!' },
+          servido: { color:'var(--ink-300)', bg:'transparent', icon:'ti-check', label:'Servido' },
+        };
+        const e = estados[p.estado] || estados.pendiente;
+        return `<div style="display:flex;align-items:center;gap:11px;padding:11px 10px;border-radius:var(--r-sm);margin-bottom:6px;background:${e.bg};${p.estado==='servido'?'opacity:.5':''}">
+          <div style="width:28px;height:28px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;color:${e.color};flex-shrink:0"><i class="ti ${e.icon}" style="font-size:14px"></i></div>
+          <div style="width:26px;text-align:center;font-size:14px;font-weight:800;color:var(--ink-700)">${p.cantidad}×</div>
           <div style="flex:1">
             <div style="font-size:14px;font-weight:700">${p.nombre_producto}</div>
-            <div style="font-size:12px;color:var(--ink-500);font-weight:600">${f$(p.precio_unitario)} c/u</div>
+            <div style="font-size:11px;color:${e.color};font-weight:700">${e.label}</div>
           </div>
           <div style="font-size:15px;font-weight:800;min-width:62px;text-align:right">${f$(p.precio_unitario*p.cantidad)}</div>
           <button onclick="borrarPedidoUI('${p.id}')" style="background:none;border:none;color:var(--danger);font-size:18px;padding:4px"><i class="ti ti-trash"></i></button>
-        </div>`).join('')}
+        </div>`;
+      }).join('')}
     </div>
     <div style="padding:12px var(--sp-4);background:#fff;border-top:1px solid var(--ink-100)">
       ${total>0?`<div style="display:flex;justify-content:space-between;margin-bottom:10px"><span style="font-size:14px;font-weight:700;color:var(--ink-700)">Total</span><span style="font-size:22px;font-weight:800">${f$(total)}</span></div>`:''}
       <div style="display:flex;gap:9px">
         <button onclick="S.mesaAddView=true;S.mesaFq='';R()" style="flex:1;padding:13px;background:var(--ink-100);border:none;border-radius:var(--r-md);font-size:14px;font-weight:700;color:var(--ink-700);display:flex;align-items:center;justify-content:center;gap:6px"><i class="ti ti-plus"></i>Agregar</button>
-        ${total>0?`<button class="btn-money" style="flex:1" onclick="S.mesaCobrarSheet=true;S.mesaPM='efectivo';S.mesaCash='';R()">Cobrar</button>`:''}
+        ${total>0 && S.empleadoActivo.rol !== 'mesero' ?`<button class="btn-money" style="flex:1" onclick="S.mesaCobrarSheet=true;S.mesaPM='efectivo';S.mesaCash='';R()">Cobrar</button>`:''}
       </div>
+      ${total>0 && S.empleadoActivo.rol === 'mesero' ? `<div style="text-align:center;font-size:12px;color:var(--ink-500);font-weight:600;margin-top:8px"><i class="ti ti-lock" style="font-size:12px"></i> Pedile al cajero que cobre esta mesa</div>` : ''}
     </div>
     ${S.mesaAddView ? sheetAgregarAMesa() : ''}
-    ${S.mesaCobrarSheet ? sheetCobrarMesa(total) : ''}
+    ${S.mesaCobrarSheet && S.empleadoActivo.rol !== 'mesero' ? sheetCobrarMesa(total) : ''}
     ${S.mesaForm ? sheetMesaForm() : ''}
   </div>`;
 }
@@ -893,6 +972,7 @@ function sheetCobrarMesa(total){
 }
 
 window.confirmarCobroMesa = async function(total){
+  if(S.empleadoActivo.rol === 'mesero'){ alert('No tenés permiso para cobrar. Pedile al cajero.'); return; }
   const items = (S.mesaPedidos||[]).map(p=>({ producto_id: p.producto_id, nombre_producto: p.nombre_producto, precio_unitario: p.precio_unitario, cantidad: p.cantidad }));
   const { error } = await DB.registrarVenta({
     negocioId: S.negocio.id, empleadoId: S.empleadoActivo.id, turnoId: S.turno.id,
