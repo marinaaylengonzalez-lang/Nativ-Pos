@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -51,7 +51,7 @@ let U = window.U = {
   email: '', password: '', confirmPassword: '',
   loading: false, error: '',
   // onboarding (alta de negocio tras signup)
-  negocioNombre: '', negocioRubro: '', nombreDueno: '',
+  negocioNombre: '', negocioRubro: '', nombreDueno: '', pinDueno: '',
 };
 
 const RUBROS = [
@@ -145,6 +145,8 @@ function renderOnboarding(){
     ${U.error ? `<div class="err"><i class="ti ti-alert-circle"></i>${U.error}</div>` : ''}
     <div class="field"><label class="lbl">Tu nombre *</label><input id="f-dueno" value="${U.nombreDueno}" oninput="U.nombreDueno=this.value" placeholder="Ej: Juan García"></div>
     <div class="field"><label class="lbl">Nombre del negocio *</label><input id="f-negocio" value="${U.negocioNombre}" placeholder="Ej: Kiosco El Sol"></div>
+    <div class="field"><label class="lbl">Elegí tu PIN de 4 dígitos *</label><input id="f-pin" type="text" inputmode="numeric" maxlength="4" value="${U.pinDueno}" oninput="U.pinDueno=this.value" placeholder="1234" style="font-size:20px;font-weight:800;letter-spacing:6px;text-align:center"></div>
+    <p style="font-size:12px;color:var(--ink-500);margin:-8px 0 14px">Vas a usar este PIN para entrar a la caja en el día a día, en vez de tu email y contraseña.</p>
     <label class="lbl" style="margin-bottom:10px">Rubro</label>
     ${rubrosHTML}
     <button class="btn-primary" onclick="doOnboarding()" ${U.loading?'disabled':''} style="margin-top:10px">
@@ -213,9 +215,11 @@ window.doSignup = async function(){
 window.doOnboarding = async function(){
   const nombreDueno = document.getElementById('f-dueno')?.value.trim() || U.nombreDueno;
   const nombre = document.getElementById('f-negocio').value.trim();
+  const pin = document.getElementById('f-pin')?.value.trim() || U.pinDueno;
   if(!nombreDueno){ U.error='Ingresá tu nombre.'; R(); return; }
   if(!nombre){ U.error='Ingresá el nombre de tu negocio.'; R(); return; }
   if(!U.negocioRubro){ U.error='Elegí un rubro.'; R(); return; }
+  if(!pin || pin.length !== 4 || !/^\d{4}$/.test(pin)){ U.error='El PIN debe ser de 4 números.'; R(); return; }
 
   U.loading = true; U.error=''; R();
 
@@ -229,19 +233,35 @@ window.doOnboarding = async function(){
     return;
   }
 
-  const { data, error } = await sb.from('negocios').insert({
+  const { data: negocio, error } = await sb.from('negocios').insert({
     owner_id: ownerId,
     nombre: nombre,
     rubro: U.negocioRubro,
     nombre_dueno: nombreDueno,
   }).select().single();
 
-  U.loading = false;
   if(error){
+    U.loading = false;
     U.error = 'No se pudo crear el negocio: ' + error.message;
     R();
     return;
   }
+
+  // Crear el registro del dueño en empleados, con su PIN, para el acceso diario
+  const { error: errEmp } = await sb.rpc('crear_empleado', {
+    p_negocio_id: negocio.id,
+    p_nombre: nombreDueno,
+    p_pin: pin,
+    p_rol: 'dueno'
+  });
+
+  U.loading = false;
+  if(errEmp){
+    U.error = 'El negocio se creó, pero hubo un error al guardar tu PIN: ' + errEmp.message;
+    R();
+    return;
+  }
+
   window.location.href = './index.html';
 };
 
