@@ -93,6 +93,17 @@ export async function actualizarProducto(productoId, campos){
   return { data, error };
 }
 
+// ── FOTOS DE PRODUCTOS (Supabase Storage) ──────────────────────
+export async function subirFotoProducto(negocioId, productoId, file){
+  const ext = file.name.split('.').pop();
+  const path = `${negocioId}/${productoId}-${Date.now()}.${ext}`;
+  const { error: uploadError } = await sb.storage.from('productos').upload(path, file, { upsert: true });
+  if(uploadError) return { url: null, error: uploadError };
+
+  const { data } = sb.storage.from('productos').getPublicUrl(path);
+  return { url: data.publicUrl, error: null };
+}
+
 export async function eliminarProducto(productoId){
   const { error } = await sb.from('productos').update({ activo: false }).eq('id', productoId);
   return { error };
