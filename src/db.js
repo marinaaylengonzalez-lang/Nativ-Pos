@@ -184,10 +184,14 @@ export async function listarPedidosMesa(mesaId){
 }
 
 export async function agregarPedidoMesa(mesaId, negocioId, empleadoId, producto){
+  return agregarPedidoMesaConCantidad(mesaId, negocioId, empleadoId, producto, 1);
+}
+
+export async function agregarPedidoMesaConCantidad(mesaId, negocioId, empleadoId, producto, cantidad){
   const { data, error } = await sb.from('pedidos_mesa').insert({
     mesa_id: mesaId, negocio_id: negocioId, empleado_id: empleadoId,
     producto_id: producto.id, nombre_producto: producto.nombre,
-    precio_unitario: producto.precio, cantidad: 1
+    precio_unitario: producto.precio, cantidad: cantidad
   }).select().single();
   return { data, error };
 }
