@@ -37,6 +37,7 @@ button{font-family:inherit;cursor:pointer}
 .btn-ghost{width:100%;padding:12px;background:none;border:none;color:var(--brand);font-size:14px;font-weight:700}
 .btn-danger-ghost{width:100%;padding:12px;background:none;border:1.5px solid var(--danger);color:var(--danger);border-radius:var(--r-md);font-size:14px;font-weight:700}
 .card{background:var(--ink-0);border-radius:var(--r-md);box-shadow:var(--shadow-card)}
+.sec-label{font-size:12px;font-weight:700;color:var(--ink-500);text-transform:uppercase;letter-spacing:.5px;margin-bottom:9px}
 .err{background:var(--danger-soft);color:var(--danger);border-radius:var(--r-sm);padding:11px 13px;font-size:13px;font-weight:600;margin-bottom:12px;display:flex;align-items:center;gap:7px}
 .spinner{width:16px;height:16px;border:2.5px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;display:inline-block}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -51,6 +52,8 @@ button{font-family:inherit;cursor:pointer}
 </head>
 <body>
 <div id="app"></div>
+
+
 
 
 
@@ -370,7 +373,7 @@ function renderTabBar(){
   </div>`;
 }
 
-window.goTab = function(tab){ S.tab = tab; S.masScreen = null; R(); };
+window.goTab = function(tab){ S.tab = tab; S.masScreen = null; S.repData = null; S.finData = null; R(); };
 
 // ════════════════════════════════════════════════════════════
 // HEADER reutilizable
@@ -689,14 +692,71 @@ function renderMesas(){
         }).join('')}
       </div>`}
     </div>
+    ${S.mesaForm ? sheetMesaForm() : ''}
   </div>`;
 }
 
-window.nuevaMesa = async function(){
-  const nombre = prompt('Nombre de la nueva mesa:');
-  if(!nombre) return;
-  const { data } = await DB.crearMesa(S.negocio.id, nombre, S.mesaZona || 'Salón', 4);
-  if(data) S.mesas.push(data);
+window.nuevaMesa = function(){
+  S.mesaForm = { id:null, nombre:'', zona: S.mesaZona || (S.mesas[0]?.zona || 'Salón'), zonaNueva:false };
+  R();
+};
+
+function sheetMesaForm(){
+  const f = S.mesaForm;
+  const zonas = [...new Set(S.mesas.map(m=>m.zona))];
+  const isEdit = !!f.id;
+  return sheetBg(`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <span style="font-size:17px;font-weight:800">${isEdit?'Editar mesa':'Nueva mesa'}</span>
+      <button onclick="S.mesaForm=null;R()" style="width:34px;height:34px;background:var(--ink-100);border:none;border-radius:50%"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="field"><label class="lbl">Nombre *</label><input id="mf-nombre" value="${f.nombre}" oninput="S.mesaForm.nombre=this.value" placeholder="Ej: Mesa 5"></div>
+    <label class="lbl" style="margin-bottom:8px">Zona</label>
+    ${!f.zonaNueva ? `
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+        ${zonas.map(z=>`<button onclick="S.mesaForm.zona='${z}';R()" style="padding:9px 16px;border-radius:99px;font-size:13px;font-weight:700;border:2px solid ${f.zona===z?A:'var(--ink-100)'};background:${f.zona===z?'var(--brand-soft)':'#fff'};color:${f.zona===z?A:'var(--ink-700)'}">${z}</button>`).join('')}
+        <button onclick="S.mesaForm.zonaNueva=true;S.mesaForm.zona='';R()" style="padding:9px 16px;border-radius:99px;font-size:13px;font-weight:700;border:1.5px dashed var(--ink-300);background:#fff;color:var(--ink-500)"><i class="ti ti-plus" style="font-size:11px"></i> Nueva zona</button>
+      </div>` : `
+      <input id="mf-zona" value="" oninput="S.mesaForm.zona=this.value" placeholder="Ej: Exterior" style="margin-bottom:8px">
+      <button class="btn-ghost" style="text-align:left;padding:4px 0;margin-bottom:8px" onclick="S.mesaForm.zonaNueva=false;S.mesaForm.zona='${zonas[0]||'Salón'}';R()">← Elegir zona existente</button>
+    `}
+    <button class="btn-primary" style="margin-top:10px" onclick="guardarMesa()">${isEdit?'Guardar cambios':'Crear mesa'}</button>
+    ${isEdit?`<button class="btn-danger-ghost" style="margin-top:10px" onclick="eliminarMesaUI('${f.id}')">Eliminar mesa</button>`:''}
+  `);
+}
+
+window.guardarMesa = async function(){
+  const nombre = document.getElementById('mf-nombre').value.trim();
+  const zonaInput = S.mesaForm.zonaNueva ? document.getElementById('mf-zona').value.trim() : S.mesaForm.zona;
+  if(!nombre){ alert('Ingresá un nombre para la mesa.'); return; }
+  if(!zonaInput){ alert('Ingresá o elegí una zona.'); return; }
+
+  if(S.mesaForm.id){
+    const { data } = await DB.actualizarMesa(S.mesaForm.id, { nombre, zona: zonaInput });
+    S.mesas = S.mesas.map(m=>m.id===S.mesaForm.id?{...m,...data}:m);
+  } else {
+    const { data } = await DB.crearMesa(S.negocio.id, nombre, zonaInput, 4);
+    if(data) S.mesas.push(data);
+  }
+  S.mesaZona = zonaInput;
+  S.mesaForm = null;
+  R();
+};
+
+window.editarMesaUI = function(mid){
+  const m = S.mesas.find(x=>x.id===mid);
+  if(!m) return;
+  S.mesaForm = { id: m.id, nombre: m.nombre, zona: m.zona, zonaNueva: false };
+  R();
+};
+
+window.eliminarMesaUI = async function(mid){
+  if(!confirm('¿Eliminar esta mesa? Se borrará también su comanda actual.')) return;
+  await DB.vaciarPedidosMesa(mid);
+  await DB.sb.from('mesas').delete().eq('id', mid);
+  S.mesas = S.mesas.filter(m=>m.id!==mid);
+  S.mesaForm = null;
+  S.mesaSel = null;
   R();
 };
 
@@ -713,7 +773,8 @@ function renderComanda(){
   const total = pedidos.reduce((a,p)=>a+p.precio_unitario*p.cantidad,0);
 
   return `<div style="display:flex;flex-direction:column;flex:1;overflow:hidden">
-    ${header(m.nombre, { back: "S.mesaSel=null;R()", right: `<span style="font-size:12px;font-weight:700;color:var(--ink-500)">${m.estado==='libre'?'Libre':m.estado==='lista'?'Para cobrar':'Ocupada'}</span>` })}
+    ${header(m.nombre, { back: "S.mesaSel=null;R()", right: `<button onclick="editarMesaUI('${m.id}')" style="width:34px;height:34px;border-radius:99px;background:var(--ink-100);border:none;display:flex;align-items:center;justify-content:center;color:var(--ink-700)"><i class="ti ti-edit" style="font-size:16px"></i></button>` })}
+    <div style="padding:6px var(--sp-4) 0;background:#fff"><span style="font-size:11px;font-weight:700;color:var(--ink-500)">${m.zona} · ${m.estado==='libre'?'Libre':m.estado==='lista'?'Para cobrar':'Ocupada'}</span></div>
     <div style="flex:1;overflow-y:auto;padding:12px var(--sp-4)">
       ${!pedidos.length ? `<div style="text-align:center;padding:40px;color:var(--ink-500)"><i class="ti ti-clipboard-list" style="font-size:36px;display:block;margin-bottom:10px"></i><p style="font-size:13px">Comanda vacía</p></div>`
       : pedidos.map(p => `<div style="display:flex;align-items:center;gap:11px;padding:11px 0;border-bottom:1px solid var(--ink-100)">
@@ -735,6 +796,7 @@ function renderComanda(){
     </div>
     ${S.mesaAddView ? sheetAgregarAMesa() : ''}
     ${S.mesaCobrarSheet ? sheetCobrarMesa(total) : ''}
+    ${S.mesaForm ? sheetMesaForm() : ''}
   </div>`;
 }
 
@@ -889,6 +951,7 @@ function renderMas(){
     { id:'clientes', icon:'ti-users', label:'Clientes', show:rol!=='mesero' },
     { id:'reportes', icon:'ti-chart-bar', label:'Reportes', show:rol==='dueno' },
     { id:'finanzas', icon:'ti-chart-line', label:'Finanzas', show:rol==='dueno' },
+    { id:'cocina', icon:'ti-tool-kitchen-2', label:'Pantalla de cocina', show:rol==='dueno', external:'./cocina.html' },
     { id:'empleados', icon:'ti-user-cog', label:'Empleados', show:rol==='dueno' },
     { id:'config', icon:'ti-settings', label:'Configuración', show:rol==='dueno' },
   ].filter(i=>i.show);
@@ -896,7 +959,7 @@ function renderMas(){
   return `<div style="display:flex;flex-direction:column;flex:1;overflow:hidden">
     ${header('Más')}
     <div style="flex:1;overflow-y:auto;padding:14px var(--sp-4)">
-      ${items.map(i=>`<div onclick="S.masScreen='${i.id}';R()" class="card" style="display:flex;align-items:center;gap:14px;padding:15px 16px;margin-bottom:9px;cursor:pointer">
+      ${items.map(i=>`<div onclick="${i.external?`window.open('${i.external}','_blank')`:`S.masScreen='${i.id}';R()`}" class="card" style="display:flex;align-items:center;gap:14px;padding:15px 16px;margin-bottom:9px;cursor:pointer">
         <i class="ti ${i.icon}" style="font-size:21px;color:var(--ink-700)"></i>
         <span style="flex:1;font-size:15px;font-weight:700">${i.label}</span>
         <i class="ti ti-chevron-right" style="color:var(--ink-300)"></i>
@@ -911,6 +974,9 @@ function renderMasScreen(){
   if(S.masScreen === 'productos') return renderProductos(back);
   if(S.masScreen === 'clientes') return renderClientesScreen(back);
   if(S.masScreen === 'empleados') return renderEmpleadosScreen(back);
+  if(S.masScreen === 'reportes') return renderReportes(back);
+  if(S.masScreen === 'finanzas') return renderFinanzas(back);
+  if(S.masScreen === 'config') return renderConfig(back);
   return `<div style="display:flex;flex-direction:column;flex:1">${header('Próximamente', {back})}<div class="center-screen"><i class="ti ti-tools" style="font-size:36px;color:var(--ink-300)"></i><p style="margin-top:10px;color:var(--ink-500);font-size:13px">Este módulo se agrega en la próxima iteración.</p></div></div>`;
 }
 
@@ -1126,6 +1192,393 @@ window.eliminarEmpleadoUI = async function(eid){
 function afterRender(){
   if(S.tab === 'caja' && S.turno && !S.prodForm) cargarResumenCaja();
 }
+
+
+// ════════════════════════════════════════════════════════════
+// REPORTES
+// ════════════════════════════════════════════════════════════
+function renderReportes(back){
+  if(!S.repData) {
+    cargarReportes();
+    return `<div style="display:flex;flex-direction:column;flex:1">${header('Reportes', {back})}<div class="center-screen"><span class="spinner" style="border-top-color:${A};border-color:rgba(26,63,160,.2)"></span></div></div>`;
+  }
+  const d = S.repData;
+  const periodoLabel = { hoy:'Hoy', semana:'Esta semana', mes:'Este mes', todo:'Todo' }[S.repPeriodo];
+
+  return `<div style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+    ${header('Reportes', { back })}
+    <div style="display:flex;gap:8px;padding:12px var(--sp-4);background:#fff;overflow-x:auto;border-bottom:1px solid var(--ink-100)">
+      ${[['hoy','Hoy'],['semana','Semana'],['mes','Mes'],['todo','Todo']].map(([id,l])=>`<button onclick="cambiarPeriodoReporte('${id}')" style="padding:8px 16px;border-radius:99px;font-size:13px;font-weight:700;white-space:nowrap;border:none;background:${S.repPeriodo===id?'var(--ink-900)':'var(--ink-100)'};color:${S.repPeriodo===id?'#fff':'var(--ink-700)'}">${l}</button>`).join('')}
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:14px var(--sp-4)">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+        <div class="card" style="padding:14px"><div style="font-size:11px;color:var(--ink-500);font-weight:700">Ventas</div><div style="font-size:24px;font-weight:800">${d.cantidad}</div></div>
+        <div class="card" style="padding:14px"><div style="font-size:11px;color:var(--ink-500);font-weight:700">Facturado</div><div style="font-size:22px;font-weight:800;color:${A}">${f$(d.total)}</div></div>
+      </div>
+
+      <div class="sec-label">Por método de pago</div>
+      <div class="card" style="overflow:hidden;margin-bottom:14px">
+        ${Object.keys(d.porMetodo).length===0?`<div style="padding:16px;text-align:center;color:var(--ink-500);font-size:13px">Sin ventas en este período.</div>`
+        :Object.entries(d.porMetodo).sort((a,b)=>b[1]-a[1]).map(([m,total])=>{
+          const labels = {efectivo:'Efectivo',transferencia:'Transferencia',tarjeta:'Tarjeta',ctacte:'Cuenta corriente'};
+          const icons = {efectivo:'ti-cash',transferencia:'ti-transfer',tarjeta:'ti-credit-card',ctacte:'ti-user-dollar'};
+          const pct = d.total ? Math.round(total/d.total*100) : 0;
+          return `<div style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--ink-100)">
+            <i class="ti ${icons[m]||'ti-receipt'}" style="font-size:18px;color:var(--ink-700);width:22px"></i>
+            <span style="flex:1;font-size:14px;font-weight:600">${labels[m]||m}</span>
+            <span style="font-size:13px;color:var(--ink-500);font-weight:600">${pct}%</span>
+            <span style="font-size:14px;font-weight:800;min-width:80px;text-align:right">${f$(total)}</span>
+          </div>`;
+        }).join('')}
+      </div>
+
+      <div class="sec-label">Más vendidos</div>
+      <div class="card" style="overflow:hidden;margin-bottom:14px">
+        ${!d.masVendidos.length?`<div style="padding:16px;text-align:center;color:var(--ink-500);font-size:13px">Sin datos.</div>`
+        :d.masVendidos.slice(0,8).map((p,i)=>`<div style="display:flex;align-items:center;gap:12px;padding:11px 14px;border-bottom:1px solid var(--ink-100)">
+          <span style="font-size:13px;font-weight:800;color:var(--ink-300);width:18px">${i+1}</span>
+          <span style="flex:1;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.nombre}</span>
+          <span style="font-size:12px;color:var(--ink-500);font-weight:700">${p.cantidad}u</span>
+          <span style="font-size:14px;font-weight:800;min-width:70px;text-align:right">${f$(p.total)}</span>
+        </div>`).join('')}
+      </div>
+
+      ${d.anuladas > 0 ? `<div style="background:var(--danger-soft);border-radius:var(--r-md);padding:13px 16px;display:flex;align-items:center;gap:10px">
+        <i class="ti ti-alert-triangle" style="color:var(--danger);font-size:18px"></i>
+        <span style="font-size:13px;font-weight:700;color:var(--danger)">${d.anuladas} venta${d.anuladas>1?'s':''} anulada${d.anuladas>1?'s':''} en este período</span>
+      </div>` : ''}
+    </div>
+  </div>`;
+}
+
+window.cambiarPeriodoReporte = function(p){ S.repPeriodo = p; S.repData = null; R(); };
+
+async function cargarReportes(){
+  const periodo = S.repPeriodo || 'hoy';
+  let desde = null;
+  const now = new Date();
+  if(periodo === 'hoy'){ desde = new Date(now.getFullYear(),now.getMonth(),now.getDate()).toISOString(); }
+  else if(periodo === 'semana'){ const d = new Date(now); d.setDate(d.getDate()-7); desde = d.toISOString(); }
+  else if(periodo === 'mes'){ desde = new Date(now.getFullYear(),now.getMonth(),1).toISOString(); }
+
+  const ventas = await DB.listarVentas(S.negocio.id, desde ? { desde } : {});
+
+  const porMetodo = {};
+  const productosMap = {};
+  let total = 0;
+
+  ventas.forEach(v => {
+    total += v.total;
+    porMetodo[v.metodo_pago] = (porMetodo[v.metodo_pago]||0) + v.total;
+    (v.venta_items||[]).forEach(it => {
+      if(!productosMap[it.nombre_producto]) productosMap[it.nombre_producto] = { nombre: it.nombre_producto, cantidad: 0, total: 0 };
+      productosMap[it.nombre_producto].cantidad += parseFloat(it.cantidad);
+      productosMap[it.nombre_producto].total += it.precio_unitario * it.cantidad;
+    });
+  });
+
+  // Ventas anuladas (consulta aparte porque listarVentas ya filtra anuladas=false)
+  let anuladasQuery = DB.sb.from('ventas').select('id', { count: 'exact', head: true }).eq('negocio_id', S.negocio.id).eq('anulada', true);
+  if(desde) anuladasQuery = anuladasQuery.gte('ts', desde);
+  const { count: anuladas } = await anuladasQuery;
+
+  S.repData = {
+    cantidad: ventas.length,
+    total,
+    porMetodo,
+    masVendidos: Object.values(productosMap).sort((a,b)=>b.cantidad-a.cantidad),
+    anuladas: anuladas || 0,
+  };
+  R();
+}
+
+
+// ════════════════════════════════════════════════════════════
+// FINANZAS
+// ════════════════════════════════════════════════════════════
+function renderFinanzas(back){
+  if(S.finForm) return renderFinForm(back);
+  if(!S.finData){ cargarFinanzas(); return `<div style="display:flex;flex-direction:column;flex:1">${header('Finanzas',{back})}<div class="center-screen"><span class="spinner" style="border-top-color:${A};border-color:rgba(26,63,160,.2)"></span></div></div>`; }
+
+  const tab = S.finTab || 'dashboard';
+  let body = '';
+  if(tab === 'dashboard') body = finDash();
+  else if(tab === 'fijos') body = finFijos();
+  else if(tab === 'variables') body = finVar();
+  else body = finProy();
+
+  return `<div style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+    ${header('Finanzas', { back })}
+    <div style="display:flex;background:#fff;border-bottom:1px solid var(--ink-100);overflow-x:auto">
+      ${[['dashboard','Resumen'],['fijos','Fijos'],['variables','Variables'],['proyeccion','Proyección']].map(([id,l])=>`<button onclick="S.finTab='${id}';R()" style="flex:1;padding:11px 6px;background:none;border:none;font-size:13px;font-weight:700;color:${tab===id?A:'var(--ink-500)'};border-bottom:2px solid ${tab===id?A:'transparent'};white-space:nowrap">${l}</button>`).join('')}
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:14px var(--sp-4)">${body}</div>
+  </div>`;
+}
+
+async function cargarFinanzas(){
+  const negocioId = S.negocio.id;
+  const mesISO = new Date().toISOString().slice(0,7);
+  const inicioMes = new Date().toISOString().slice(0,7)+'-01';
+
+  const [gastosFijos, gastosVar, ventasMes] = await Promise.all([
+    DB.listarGastosFijos(negocioId),
+    DB.listarGastosVariables(negocioId, mesISO),
+    DB.listarVentas(negocioId, { desde: inicioMes }),
+  ]);
+
+  const hoy = new Date().toDateString();
+  const ventasHoy = ventasMes.filter(v => new Date(v.ts).toDateString() === hoy).reduce((a,v)=>a+v.total,0);
+  const totalVentasMes = ventasMes.reduce((a,v)=>a+v.total,0);
+
+  S.finData = { gastosFijos, gastosVar, ventasMes, ventasHoy, totalVentasMes };
+  R();
+}
+
+function diasMesFin(){ return new Date(new Date().getFullYear(), new Date().getMonth()+1, 0).getDate(); }
+function diaActFin(){ return new Date().getDate(); }
+function totalFijosFin(){ return (S.finData.gastosFijos||[]).reduce((a,g)=>a+g.monto,0); }
+function totalVarFin(){ return (S.finData.gastosVar||[]).reduce((a,g)=>a+g.monto,0); }
+function gananciaFin(){ return S.finData.totalVentasMes - totalFijosFin() - totalVarFin(); }
+function margenFin(){ const v=S.finData.totalVentasMes; return v ? Math.round(gananciaFin()/v*100) : 0; }
+function promDiarioFin(){
+  const byDay = {};
+  S.finData.ventasMes.forEach(v=>{ const d=new Date(v.ts).toDateString(); byDay[d]=(byDay[d]||0)+v.total; });
+  const vals = Object.values(byDay);
+  return vals.length ? vals.reduce((a,v)=>a+v,0)/vals.length : 0;
+}
+
+function finDash(){
+  const gf = totalFijosFin(), gv = totalVarFin(), vm = S.finData.totalVentasMes, gan = gananciaFin(), mg = margenFin();
+  const vh = S.finData.ventasHoy;
+  const gastoDia = Math.round(gf/diasMesFin() + gv/Math.max(1,diaActFin()));
+  const ganHoy = vh - gastoDia;
+  const pctMes = Math.min(100, Math.round(diaActFin()/diasMesFin()*100));
+
+  return `
+  <div style="background:${A};border-radius:12px;padding:14px;margin-bottom:14px">
+    <div style="font-size:13px;color:rgba(255,255,255,.7);margin-bottom:10px">Hoy</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+      <div style="background:rgba(255,255,255,.15);border-radius:9px;padding:10px"><div style="font-size:11px;color:rgba(255,255,255,.7)">Ventas</div><div style="font-size:16px;font-weight:800;color:#fff">${f$(vh)}</div></div>
+      <div style="background:rgba(255,255,255,.15);border-radius:9px;padding:10px"><div style="font-size:11px;color:rgba(255,255,255,.7)">Gastos</div><div style="font-size:16px;font-weight:800;color:#fca5a5">${f$(gastoDia)}</div></div>
+      <div style="background:rgba(255,255,255,.15);border-radius:9px;padding:10px"><div style="font-size:11px;color:rgba(255,255,255,.7)">Result.</div><div style="font-size:16px;font-weight:800;color:${ganHoy>=0?'#86efac':'#fca5a5'}">${f$(ganHoy)}</div></div>
+    </div>
+  </div>
+  <div class="card" style="padding:14px;margin-bottom:14px">
+    <div style="display:flex;justify-content:space-between;margin-bottom:10px">
+      <div><div style="font-size:12px;color:var(--ink-500)">Ingresos mes</div><div style="font-size:22px;font-weight:800;color:${A}">${f$(vm)}</div></div>
+      <div style="text-align:right"><div style="font-size:12px;color:var(--ink-500)">Resultado</div><div style="font-size:22px;font-weight:800;color:${gan>=0?MONEY:'var(--danger)'}">${gan>=0?'+':''}${f$(gan)}</div></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--ink-500);margin-bottom:4px"><span>Avance del mes</span><span>${pctMes}%</span></div>
+    <div style="height:7px;border-radius:99px;background:var(--ink-100);overflow:hidden;margin-bottom:10px"><div style="height:100%;background:${A};width:${pctMes}%"></div></div>
+    ${[['Gastos fijos',gf,'var(--danger)',vm?Math.round(gf/vm*100):0],['Gastos variables',gv,'var(--warn)',vm?Math.round(gv/vm*100):0],['Ganancia neta',Math.max(0,gan),MONEY,Math.max(0,mg)]].map(([l,v,c,p])=>`
+      <div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px"><span style="color:var(--ink-700)">${l}</span><span style="font-weight:700;color:${c}">${f$(v)} (${p}%)</span></div><div style="height:6px;border-radius:99px;background:var(--ink-100);overflow:hidden"><div style="height:100%;background:${c};width:${Math.min(100,p)}%"></div></div></div>`).join('')}
+  </div>
+  <div style="background:${mg>=20?'var(--money-soft)':mg>=10?'var(--warn-soft)':'var(--danger-soft)'};border-radius:12px;padding:14px;display:flex;justify-content:space-between;align-items:center">
+    <div><div style="font-size:12px;color:var(--ink-700)">Margen de ganancia</div><div style="font-size:30px;font-weight:800;color:${mg>=20?MONEY:mg>=10?'var(--warn)':'var(--danger)'}">${mg}%</div><div style="font-size:12px;color:var(--ink-500)">${mg>=20?'Saludable':mg>=10?'Ajustado':'Bajo'}</div></div>
+    <div style="font-size:38px">${mg>=20?'💚':mg>=10?'⚠️':'🔴'}</div>
+  </div>`;
+}
+
+function finFijos(){
+  const items = S.finData.gastosFijos;
+  const total = totalFijosFin();
+  return `
+  <div style="background:var(--danger-soft);border-radius:12px;padding:14px;display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+    <div><div style="font-size:12px;color:var(--danger)">Total fijos / mes</div><div style="font-size:26px;font-weight:800;color:var(--danger)">${f$(total)}</div></div><div style="font-size:34px">📌</div>
+  </div>
+  ${!items.length?`<div style="text-align:center;padding:24px;color:var(--ink-500);font-size:13px">Sin gastos fijos. Agregá alquiler, sueldos, etc.</div>`
+  :items.map(g=>`<div class="card" style="display:flex;align-items:center;gap:11px;padding:12px 14px;margin-bottom:8px">
+    <div style="flex:1"><div style="font-size:14px;font-weight:700">${g.nombre}</div><div style="font-size:11px;color:var(--ink-500)">${g.categoria}</div></div>
+    <div style="font-size:14px;font-weight:800;color:var(--danger);margin-right:6px">${f$(g.monto)}</div>
+    <button onclick="eliminarGastoFijoUI('${g.id}')" style="background:none;border:none;color:var(--danger);font-size:17px"><i class="ti ti-trash"></i></button>
+  </div>`).join('')}
+  <button class="btn-primary" style="margin-top:10px" onclick="S.finForm={tipo:'fijo',nombre:'',monto:'',categoria:'Local'};R()"><i class="ti ti-plus"></i> Agregar gasto fijo</button>`;
+}
+
+function finVar(){
+  const items = S.finData.gastosVar;
+  const total = totalVarFin();
+  return `
+  <div style="background:var(--warn-soft);border-radius:12px;padding:14px;display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+    <div><div style="font-size:12px;color:var(--warn)">Variables este mes</div><div style="font-size:26px;font-weight:800;color:var(--warn)">${f$(total)}</div></div><div style="font-size:34px">📋</div>
+  </div>
+  ${!items.length?`<div style="text-align:center;padding:24px;color:var(--ink-500);font-size:13px">Sin gastos variables este mes.</div>`
+  :items.map(g=>`<div class="card" style="display:flex;align-items:center;gap:11px;padding:12px 14px;margin-bottom:8px">
+    <div style="flex:1"><div style="font-size:14px;font-weight:700">${g.nombre}</div><div style="font-size:11px;color:var(--ink-500)">${new Date(g.ts).toLocaleDateString('es-AR')} · ${g.categoria}</div></div>
+    <div style="font-size:14px;font-weight:800;color:var(--warn);margin-right:6px">${f$(g.monto)}</div>
+    <button onclick="eliminarGastoVarUI('${g.id}')" style="background:none;border:none;color:var(--danger);font-size:17px"><i class="ti ti-trash"></i></button>
+  </div>`).join('')}
+  <button class="btn-primary" style="margin-top:10px" onclick="S.finForm={tipo:'variable',nombre:'',monto:'',categoria:'Mercadería'};R()"><i class="ti ti-plus"></i> Registrar gasto</button>`;
+}
+
+function finProy(){
+  const prom = promDiarioFin();
+  const gfDia = Math.round(totalFijosFin()/diasMesFin());
+  const gvDia = Math.round(totalVarFin()/Math.max(1,diaActFin()));
+  const gastoDia = gfDia + gvDia;
+  const pv = Math.round(prom*diasMesFin());
+  const pg = Math.round(totalFijosFin() + gvDia*diasMesFin());
+  const pgan = pv - pg;
+  const rest = diasMesFin() - diaActFin();
+
+  return `
+  <div style="background:linear-gradient(135deg,${A},#0d2570);border-radius:12px;padding:15px;margin-bottom:14px">
+    <div style="font-size:13px;color:rgba(255,255,255,.7);margin-bottom:10px">Proyección fin de mes · ${rest} días restantes</div>
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div><div style="font-size:13px;color:rgba(255,255,255,.7)">Ganancia proyectada</div><div style="font-size:28px;font-weight:800;color:${pgan>=0?'#86efac':'#fca5a5'}">${pgan>=0?'+':''}${f$(pgan)}</div></div>
+      <div style="font-size:38px">${pgan>=0?'📈':'📉'}</div>
+    </div>
+  </div>
+  <div class="card" style="overflow:hidden;margin-bottom:14px">
+    ${[['Venta diaria prom.',prom,A,'ti-trending-up'],['Gasto fijo/día',gfDia,'var(--danger)','ti-lock'],['Gasto var./día',gvDia,'var(--warn)','ti-receipt']].map(([l,v,c,icon])=>`
+      <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--ink-100)"><i class="ti ${icon}" style="font-size:18px;color:${c};width:22px"></i><span style="flex:1;font-size:14px;color:var(--ink-700)">${l}</span><span style="font-size:14px;font-weight:800;color:${c}">${f$(v)}</span></div>`).join('')}
+  </div>`;
+}
+
+function renderFinForm(back){
+  const f = S.finForm;
+  const esFijo = f.tipo === 'fijo';
+  const CATS = esFijo ? ['Local','Servicios','Personal','Impuestos','Otro'] : ['Mercadería','Insumos','Logística','Otro'];
+  return `<div style="display:flex;flex-direction:column;flex:1">
+    ${header(esFijo?'Nuevo gasto fijo':'Registrar gasto', { back: "S.finForm=null;R()" })}
+    <div style="flex:1;overflow-y:auto;padding:14px var(--sp-4)">
+      <div class="field"><label class="lbl">${esFijo?'Nombre':'Descripción'} *</label><input id="ff-nombre" value="${f.nombre}" oninput="S.finForm.nombre=this.value" placeholder="${esFijo?'Ej: Alquiler':'Ej: Compra mercadería'}"></div>
+      <div class="field"><label class="lbl">Monto *</label><input id="ff-monto" type="text" inputmode="decimal" value="${f.monto}" oninput="S.finForm.monto=this.value" placeholder="0" style="font-size:20px;font-weight:800"></div>
+      <label class="lbl" style="margin-bottom:8px">Categoría</label>
+      <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:16px">${CATS.map(c=>`<button onclick="S.finForm.categoria='${c}';R()" style="padding:8px 15px;border-radius:99px;font-size:13px;font-weight:700;border:2px solid ${f.categoria===c?A:'var(--ink-100)'};background:${f.categoria===c?'var(--brand-soft)':'#fff'};color:${f.categoria===c?A:'var(--ink-700)'}">${c}</button>`).join('')}</div>
+      <button class="btn-primary" onclick="guardarGastoFin()">${esFijo?'Agregar gasto fijo':'Registrar gasto'}</button>
+    </div>
+  </div>`;
+}
+
+window.guardarGastoFin = async function(){
+  const f = S.finForm;
+  const nombre = document.getElementById('ff-nombre').value.trim();
+  const monto = parseFloat(document.getElementById('ff-monto').value) || 0;
+  if(!nombre || !monto){ alert('Completá nombre y monto.'); return; }
+
+  if(f.tipo === 'fijo'){
+    const { data } = await DB.crearGastoFijo(S.negocio.id, nombre, monto, f.categoria);
+    if(data) S.finData.gastosFijos.push(data);
+  } else {
+    const { data } = await DB.crearGastoVariable(S.negocio.id, nombre, monto, f.categoria);
+    if(data) S.finData.gastosVar.unshift(data);
+  }
+  S.finForm = null;
+  R();
+};
+window.eliminarGastoFijoUI = async function(id){
+  await DB.eliminarGastoFijo(id);
+  S.finData.gastosFijos = S.finData.gastosFijos.filter(g=>g.id!==id);
+  R();
+};
+window.eliminarGastoVarUI = async function(id){
+  await DB.eliminarGastoVariable(id);
+  S.finData.gastosVar = S.finData.gastosVar.filter(g=>g.id!==id);
+  R();
+};
+
+
+// ════════════════════════════════════════════════════════════
+// CONFIGURACIÓN
+// ════════════════════════════════════════════════════════════
+function renderConfig(back){
+  if(!S.cfgForm){
+    const cfg = S.negocio.config || {};
+    S.cfgForm = {
+      nombre: S.negocio.nombre,
+      controla_stock: S.negocio.controla_stock !== false,
+      metodos: cfg.metodos || { efectivo:true, transferencia:true, tarjeta:true, ctacte:true },
+      moneda_usd: !!cfg.moneda_usd,
+      tc_usd: cfg.tc_usd || '',
+      ticket_pie: cfg.ticket_pie || '¡Gracias por su compra!',
+    };
+  }
+  const f = S.cfgForm;
+  const metLabels = { efectivo:['Efectivo','ti-cash'], transferencia:['Transferencia','ti-transfer'], tarjeta:['Tarjeta','ti-credit-card'], ctacte:['Cuenta corriente','ti-user-dollar'] };
+
+  return `<div style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+    ${header('Configuración', { back })}
+    <div style="flex:1;overflow-y:auto;padding:14px var(--sp-4)">
+
+      <div class="sec-label">Datos del negocio</div>
+      <div class="field"><label class="lbl">Nombre</label><input id="cfg-nombre" value="${f.nombre}" oninput="S.cfgForm.nombre=this.value"></div>
+
+      <div class="sec-label" style="margin-top:6px">Métodos de pago habilitados</div>
+      <div class="card" style="overflow:hidden;margin-bottom:18px">
+        ${Object.entries(metLabels).map(([id,[label,icon]])=>`
+          <div onclick="S.cfgForm.metodos.${id}=!S.cfgForm.metodos.${id};R()" style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-bottom:1px solid var(--ink-100);cursor:pointer">
+            <i class="ti ${icon}" style="font-size:18px;color:var(--ink-700);width:22px"></i>
+            <span style="flex:1;font-size:14px;font-weight:600">${label}</span>
+            <div style="width:40px;height:22px;border-radius:99px;background:${f.metodos[id]?A:'var(--ink-300)'};position:relative">
+              <div style="position:absolute;width:16px;height:16px;border-radius:50%;background:#fff;top:3px;left:${f.metodos[id]?21:3}px;transition:left .15s"></div>
+            </div>
+          </div>`).join('')}
+      </div>
+
+      <div class="sec-label">Stock</div>
+      <div onclick="S.cfgForm.controla_stock=!S.cfgForm.controla_stock;R()" style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px;background:var(--ink-100);border-radius:var(--r-md);margin-bottom:18px;cursor:pointer">
+        <div><div style="font-size:14px;font-weight:700">Controlar stock por defecto</div><div style="font-size:11px;color:var(--ink-500)">Los artículos nuevos lo traen activado</div></div>
+        <div style="width:40px;height:22px;border-radius:99px;background:${f.controla_stock?A:'var(--ink-300)'};position:relative;flex-shrink:0">
+          <div style="position:absolute;width:16px;height:16px;border-radius:50%;background:#fff;top:3px;left:${f.controla_stock?21:3}px;transition:left .15s"></div>
+        </div>
+      </div>
+
+      <div class="sec-label">Moneda extranjera</div>
+      <div onclick="S.cfgForm.moneda_usd=!S.cfgForm.moneda_usd;R()" style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px;background:var(--ink-100);border-radius:var(--r-md);margin-bottom:${f.moneda_usd?'10px':'18px'};cursor:pointer">
+        <div><div style="font-size:14px;font-weight:700">Aceptar USD / cambio</div><div style="font-size:11px;color:var(--ink-500)">Habilita cobro en dólares con tipo de cambio</div></div>
+        <div style="width:40px;height:22px;border-radius:99px;background:${f.moneda_usd?A:'var(--ink-300)'};position:relative;flex-shrink:0">
+          <div style="position:absolute;width:16px;height:16px;border-radius:50%;background:#fff;top:3px;left:${f.moneda_usd?21:3}px;transition:left .15s"></div>
+        </div>
+      </div>
+      ${f.moneda_usd ? `<div class="field"><label class="lbl">Tipo de cambio (1 USD = $ ARS)</label><input id="cfg-tc" type="text" inputmode="decimal" value="${f.tc_usd}" oninput="S.cfgForm.tc_usd=this.value" placeholder="Ej: 1450" style="margin-bottom:18px"></div>` : ''}
+
+      <div class="sec-label">Ticket</div>
+      <div class="field"><label class="lbl">Mensaje de pie del ticket</label><input id="cfg-pie" value="${f.ticket_pie}" oninput="S.cfgForm.ticket_pie=this.value" placeholder="¡Gracias por su compra!"></div>
+
+      <button class="btn-primary" style="margin-top:6px" onclick="guardarConfig()"><i class="ti ti-check"></i> Guardar cambios</button>
+
+      <div class="sec-label" style="margin-top:24px">Cuenta</div>
+      <div class="card" style="padding:13px 14px;margin-bottom:10px">
+        <div style="font-size:11px;color:var(--ink-500)">Dueño</div>
+        <div style="font-size:14px;font-weight:700">${S.negocio.nombre_dueno || '—'}</div>
+      </div>
+      <button class="btn-danger-ghost" onclick="logout()"><i class="ti ti-logout"></i> Cerrar sesión</button>
+    </div>
+  </div>`;
+}
+
+window.guardarConfig = async function(){
+  const f = S.cfgForm;
+  const nombre = document.getElementById('cfg-nombre').value.trim();
+  const ticket_pie = document.getElementById('cfg-pie').value.trim();
+  const tc_usd = f.moneda_usd ? (parseFloat(document.getElementById('cfg-tc')?.value) || 0) : 0;
+
+  if(!nombre){ alert('El nombre del negocio no puede estar vacío.'); return; }
+
+  // Actualizar nombre del negocio (columna directa)
+  if(nombre !== S.negocio.nombre){
+    await DB.actualizarNegocio(S.negocio.id, { nombre, controla_stock: f.controla_stock });
+    S.negocio.nombre = nombre;
+  } else {
+    await DB.actualizarNegocio(S.negocio.id, { controla_stock: f.controla_stock });
+  }
+  S.negocio.controla_stock = f.controla_stock;
+
+  // Actualizar config (columna jsonb)
+  const { data } = await DB.actualizarConfigNegocio(S.negocio.id, {
+    metodos: f.metodos,
+    moneda_usd: f.moneda_usd,
+    tc_usd,
+    ticket_pie,
+  });
+  if(data) S.negocio.config = data.config;
+
+  S.cfgForm = null;
+  alert('Configuración guardada.');
+  R();
+};
 </script>
 </body>
 </html>
