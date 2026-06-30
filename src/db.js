@@ -17,9 +17,9 @@ export async function getSessionUser(){
 export async function getMiNegocio(){
   const user = await getSessionUser();
   if(!user) return null;
-  const { data, error } = await sb.from('negocios').select('*').eq('owner_id', user.id).limit(1).maybeSingle();
-  if(error) return null;
-  return data;
+  const { data, error } = await sb.from('negocios').select('*').eq('owner_id', user.id).limit(1);
+  if(error || !data || data.length === 0) return null;
+  return data[0];
 }
 
 export async function actualizarConfigNegocio(negocioId, patchConfig){
@@ -140,10 +140,10 @@ export async function registrarMovimientoCliente(clienteId, negocioId, tipo, mon
 
 // ── TURNOS ──────────────────────────────────────────────────────
 export async function turnoAbierto(negocioId){
-  // maybeSingle() devuelve null sin error cuando no hay filas,
-  // a diferencia de single() que lanza un 406 si la tabla está vacía.
-  const { data } = await sb.from('turnos').select('*').eq('negocio_id', negocioId).is('cerrado_en', null).order('abierto_en', { ascending: false }).limit(1).maybeSingle();
-  return data || null;
+  // Usamos limit(1) y tomamos [0] para evitar el error 406 de .single()
+  // cuando no hay filas — compatible con todas las versiones de supabase-js.
+  const { data } = await sb.from('turnos').select('*').eq('negocio_id', negocioId).is('cerrado_en', null).order('abierto_en', { ascending: false }).limit(1);
+  return (data && data.length > 0) ? data[0] : null;
 }
 
 export async function abrirTurno(negocioId, empleadoId, montoInicial){
