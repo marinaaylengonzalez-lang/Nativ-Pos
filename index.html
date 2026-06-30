@@ -198,7 +198,12 @@ boot();
 // ════════════════════════════════════════════════════════════
 function render(){
   if(S.loading) return renderLoading();
+  if(S.error) return renderLoading(); // muestra el error con botón reintentar
   if(S.empleados.length > 0 && !S.empleadoActivo) return renderPIN();
+  if(!S.empleadoActivo) {
+    // Fallback: si por algún motivo empleadoActivo es null, forzar como dueño
+    S.empleadoActivo = { id: null, nombre: S.negocio?.nombre_dueno || 'Dueño', rol: 'dueno' };
+  }
   if(!S.turno) return renderAbrirTurno();
 
   let body = '';
