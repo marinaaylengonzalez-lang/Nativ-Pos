@@ -167,13 +167,11 @@ async function boot(){
     S.mesas = mesas;
     S.turno = turno;
 
-    // Si no hay empleados creados, el dueño entra directo sin PIN.
+    // Nota: el dueño ahora SIEMPRE tiene un registro en empleados con rol 'dueno'
+    // y su propio PIN (creado en el onboarding). Si por alguna razón un negocio
+    // viejo no tiene ningún empleado todavía, lo mandamos a crear su PIN ahora.
     if(empleados.length === 0){
-      S.empleadoActivo = {
-        id: null,
-        nombre: negocio.nombre_dueno || 'Dueño',
-        rol: 'dueno'
-      };
+      S.necesitaCrearPinDueno = true;
     }
 
     S.loading = false;
@@ -200,12 +198,9 @@ boot();
 // ════════════════════════════════════════════════════════════
 function render(){
   if(S.loading) return renderLoading();
-  if(S.error) return renderLoading(); // muestra el error con botón reintentar
-  if(S.empleados.length > 0 && !S.empleadoActivo) return renderPIN();
-  if(!S.empleadoActivo) {
-    // Fallback: si por algún motivo empleadoActivo es null, forzar como dueño
-    S.empleadoActivo = { id: null, nombre: S.negocio?.nombre_dueno || 'Dueño', rol: 'dueno' };
-  }
+  if(S.error) return renderLoading();
+  if(S.necesitaCrearPinDueno) return renderCrearPinDueno();
+  if(!S.empleadoActivo) return renderPIN();
   if(!S.turno) return renderAbrirTurno();
 
   let body = '';
@@ -228,6 +223,20 @@ function renderLoading(){
 // ════════════════════════════════════════════════════════════
 // PIN DE EMPLEADOS
 // ════════════════════════════════════════════════════════════
+function renderCrearPinDueno(){
+  return `<div class="center-screen fade">
+    <div style="width:64px;height:64px;border-radius:50%;background:#fef3e2;display:flex;align-items:center;justify-content:center;margin-bottom:14px"><i class="ti ti-shield-lock" style="font-size:28px;color:var(--warn)"></i></div>
+    <div style="font-size:18px;font-weight:800;margin-bottom:4px">Creá tu PIN de acceso</div>
+    <div style="font-size:13px;color:var(--ink-500);text-align:center;margin-bottom:22px;max-width:280px">Vas a usar este PIN de 4 dígitos para entrar a la caja de ahora en más, en vez de tu email y contraseña.</div>
+    ${S.pinError ? `<div class="err"><i class="ti ti-alert-circle"></i>${S.pinError}</div>` : ''}
+    <div class="field" style="width:100%">
+      <label class="lbl">Elegí un PIN de 4 dígitos</label>
+      <input id="cpd-pin" type="text" inputmode="numeric" maxlength="4" placeholder="1234" style="font-size:22px;font-weight:800;letter-spacing:6px;text-align:center">
+    </div>
+    <button class="btn-primary" onclick="crearPinDueno()"><i class="ti ti-check"></i> Confirmar PIN</button>
+  </div>`;
+}
+
 function renderPIN(){
   const sel = S.pinSel;
   if(!sel){
@@ -238,22 +247,11 @@ function renderPIN(){
       <div style="width:100%;display:flex;flex-direction:column;gap:10px">
         ${S.empleados.map(e => `
           <div onclick="selectPinUser('${e.id}')" class="card" style="display:flex;align-items:center;gap:13px;padding:14px 16px;cursor:pointer">
-            <div style="width:44px;height:44px;border-radius:50%;background:var(--brand-soft);display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:800;color:var(--brand)">${e.nombre.charAt(0).toUpperCase()}</div>
+            <div style="width:44px;height:44px;border-radius:50%;background:${e.rol==='dueno'?'#fef3e2':'var(--brand-soft)'};display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:800;color:${e.rol==='dueno'?'var(--warn)':'var(--brand)'}">${e.rol==='dueno'?'<i class="ti ti-crown" style="font-size:18px"></i>':e.nombre.charAt(0).toUpperCase()}</div>
             <div><div style="font-size:15px;font-weight:700">${e.nombre}</div><div style="font-size:12px;color:var(--ink-500);font-weight:600">${rolLabel(e.rol)}</div></div>
           </div>`).join('')}
-        <div onclick="selectPinUser('owner')" class="card" style="display:flex;align-items:center;gap:13px;padding:14px 16px;cursor:pointer;border:1.5px dashed var(--ink-300);box-shadow:none">
-          <div style="width:44px;height:44px;border-radius:50%;background:var(--ink-100);display:flex;align-items:center;justify-content:center;font-size:19px;color:var(--ink-500)"><i class="ti ti-crown"></i></div>
-          <div><div style="font-size:15px;font-weight:700">Soy el dueño</div><div style="font-size:12px;color:var(--ink-500);font-weight:600">Acceso completo</div></div>
-        </div>
       </div>
     </div>`;
-  }
-
-  if(sel === 'owner'){
-    // El dueño entra directo sin PIN (ya tiene su sesión de Supabase Auth)
-    S.empleadoActivo = { id: null, nombre: 'Dueño', rol: 'dueno' };
-    R();
-    return renderLoading();
   }
 
   const emp = S.empleados.find(e => e.id === sel);
@@ -280,6 +278,27 @@ function rolLabel(rol){
 }
 
 window.selectPinUser = function(id){ S.pinSel = id; S.pinBuffer=''; S.pinError=''; R(); };
+
+window.crearPinDueno = async function(){
+  const pin = document.getElementById('cpd-pin').value.trim();
+  if(pin.length !== 4 || !/^\d{4}$/.test(pin)){
+    S.pinError = 'El PIN debe ser de 4 números.';
+    R();
+    return;
+  }
+  const nombre = S.negocio.nombre_dueno || 'Dueño';
+  const { data, error } = await DB.crearEmpleado(S.negocio.id, nombre, pin, 'dueno');
+  if(error){
+    S.pinError = 'No se pudo crear el PIN: ' + error.message;
+    R();
+    return;
+  }
+  S.empleados = await DB.listarEmpleados(S.negocio.id);
+  S.necesitaCrearPinDueno = false;
+  S.pinError = '';
+  // Lo dejamos en la pantalla de selección para que entre con su PIN recién creado
+  R();
+};
 
 window.pinPress = async function(d){
   if(S.pinBuffer.length >= 4) return;
