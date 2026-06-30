@@ -123,7 +123,8 @@ function sonarAlerta(){
 }
 
 async function pollItemsListos(){
-  if(!S.negocio || !S.turno) return;
+  // Solo correr si la app está completamente cargada, hay sesión y hay turno abierto
+  if(S.loading || !S.negocio || !S.turno || !S.empleadoActivo) return;
   try {
     const { data } = await DB.sb.from('pedidos_mesa')
       .select('mesa_id, estado')
@@ -133,13 +134,12 @@ async function pollItemsListos(){
     const conteo = {};
     (data || []).forEach(p => { conteo[p.mesa_id] = (conteo[p.mesa_id] || 0) + 1; });
 
-    // Detectar si apareció algo nuevo que antes no estaba
     const hayNuevo = Object.entries(conteo).some(([mid, cnt]) => (S.itemsListos[mid] || 0) < cnt);
     if(hayNuevo) sonarAlerta();
 
     const cambio = JSON.stringify(conteo) !== JSON.stringify(S.itemsListos);
     S.itemsListos = conteo;
-    if(cambio && S.tab === 'mesas') R(); // solo re-render si estamos en la pantalla de mesas
+    if(cambio && S.tab === 'mesas') R();
   } catch(e){}
 }
 
@@ -179,9 +179,11 @@ async function boot(){
     S.loading = false;
     R();
 
-    // Arrancar polling de items listos (para que el mesero vea alertas)
+    // Arrancar polling solo si ya hay turno abierto
     if(S.pollTimer) clearInterval(S.pollTimer);
-    S.pollTimer = setInterval(pollItemsListos, 15000);
+    if(turno){
+      S.pollTimer = setInterval(pollItemsListos, 15000);
+    }
 
   } catch(e) {
     console.error('[Nativ POS] Error en boot:', e);
@@ -318,7 +320,13 @@ function renderAbrirTurno(){
 window.doAbrirTurno = async function(){
   const monto = parseFloat(document.getElementById('at-monto').value) || 0;
   const { data, error } = await DB.abrirTurno(S.negocio.id, S.empleadoActivo.id, monto);
-  if(!error){ S.turno = data; R(); }
+  if(!error){
+    S.turno = data;
+    // Arrancar polling ahora que hay turno
+    if(S.pollTimer) clearInterval(S.pollTimer);
+    S.pollTimer = setInterval(pollItemsListos, 15000);
+    R();
+  }
 };
 
 // ════════════════════════════════════════════════════════════
@@ -845,6 +853,8 @@ window.doCerrarTurno = async function(){
   const decl = parseFloat(document.getElementById('ct-monto').value) || 0;
   const dif = decl - (S._efectivoEsperado||0);
   await DB.cerrarTurno(S.turno.id, decl, dif);
+  // Detener polling al cerrar turno
+  if(S.pollTimer){ clearInterval(S.pollTimer); S.pollTimer = null; }
   S.turno = null; S.sheet = null;
   R();
 };
