@@ -109,6 +109,12 @@ window.R = R;
 
 const f$ = n => '$' + (Math.round(n) || 0).toLocaleString('es-AR');
 
+// Devuelve el HTML interior de un "icono" de producto: foto real si existe, o emoji.
+function prodIcono(p, fontSize){
+  if(p.foto_url) return `<img src="${p.foto_url}" style="width:100%;height:100%;object-fit:cover">`;
+  return `<span style="font-size:${fontSize}px">${p.emoji||'📦'}</span>`;
+}
+
 // ── BOOT ──────────────────────────────────────────────────────
 // ── SONIDO Y POLLING (mesero) ────────────────────────────────
 function sonarAlerta(){
@@ -473,7 +479,7 @@ function renderVender(){
           return `<div onclick="${oos?'':`addToCart('${p.id}')`}" class="card" style="overflow:hidden;position:relative;${oos?'opacity:.4':'cursor:pointer'}">
             ${qty>0 ? `<div style="position:absolute;top:8px;right:8px;width:26px;height:26px;border-radius:50%;background:${MONEY};color:#fff;font-size:13px;font-weight:800;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 10px rgba(15,157,88,.4);z-index:2">${qty}</div>` : ''}
             ${p.controla_stock ? `<div style="position:absolute;top:8px;left:8px;font-size:10px;font-weight:800;padding:3px 7px;border-radius:99px;background:rgba(255,255,255,.92);color:${p.stock<=p.stock_minimo?'var(--warn)':'var(--ink-700)'};z-index:2">${p.stock<=0?'Sin stock':p.stock+' u.'}</div>` : ''}
-            <div style="height:78px;display:flex;align-items:center;justify-content:center;font-size:34px;background:${p.color||'#eee'}33">${p.emoji||'📦'}</div>
+            <div style="height:78px;display:flex;align-items:center;justify-content:center;background:${p.color||'#eee'}33;overflow:hidden">${prodIcono(p,34)}</div>
             <div style="padding:10px 12px 12px">
               <div style="font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:5px">${p.nombre}</div>
               <div style="font-size:17px;font-weight:800;color:${A}">${f$(p.precio)}</div>
@@ -535,7 +541,7 @@ function sheetCart(){
     ${items.map(([id,q])=>{
       const p = S.productos.find(x=>x.id===id); if(!p) return '';
       return `<div style="display:flex;align-items:center;gap:11px;padding:11px 0;border-bottom:1px solid var(--ink-100)">
-        <div style="width:42px;height:42px;border-radius:12px;background:${p.color||'#eee'}33;display:flex;align-items:center;justify-content:center;font-size:19px;flex-shrink:0">${p.emoji||'📦'}</div>
+        <div style="width:42px;height:42px;border-radius:12px;background:${p.color||'#eee'}33;display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden">${prodIcono(p,19)}</div>
         <div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.nombre}</div><div style="font-size:12px;color:var(--ink-500);font-weight:600">${f$(p.precio)} c/u</div></div>
         <div style="display:flex;align-items:center;gap:8px;background:var(--ink-100);border-radius:99px;padding:5px">
           <button onclick="adjCart('${id}',-1)" style="width:26px;height:26px;border-radius:50%;background:#fff;border:none;font-size:15px;font-weight:800;box-shadow:var(--shadow-card)">−</button>
@@ -926,7 +932,7 @@ function sheetAgregarAMesa(){
     <input value="${S.mesaFq}" oninput="S.mesaFq=this.value;R()" placeholder="Buscar producto..." style="margin-bottom:12px">
     <div style="max-height:340px;overflow-y:auto">
       ${fil.map(p => `<div onclick="S.mesaAddSel='${p.id}';S.mesaAddCant=1;R()" style="display:flex;align-items:center;gap:11px;padding:10px 4px;border-bottom:1px solid var(--ink-100);cursor:pointer">
-        <div style="width:40px;height:40px;border-radius:11px;background:${p.color||'#eee'}33;display:flex;align-items:center;justify-content:center;font-size:18px">${p.emoji||'📦'}</div>
+        <div style="width:40px;height:40px;border-radius:11px;background:${p.color||'#eee'}33;display:flex;align-items:center;justify-content:center;overflow:hidden">${prodIcono(p,18)}</div>
         <span style="flex:1;font-size:14px;font-weight:700">${p.nombre}</span>
         <span style="font-size:14px;font-weight:800;color:${A}">${f$(p.precio)}</span>
       </div>`).join('')}
@@ -1110,7 +1116,7 @@ function renderProductos(back){
         const tieneMargen = p.precio_costo != null && p.precio_costo > 0;
         const margenPct = tieneMargen ? Math.round((p.precio-p.precio_costo)/p.precio*100) : null;
         return `<div onclick="abrirEditarProducto('${p.id}')" class="card" style="display:flex;align-items:center;gap:12px;padding:12px 14px;margin-bottom:9px;cursor:pointer">
-        <div style="width:46px;height:46px;border-radius:13px;background:${p.color||'#eee'}33;display:flex;align-items:center;justify-content:center;font-size:21px;flex-shrink:0">${p.emoji||'📦'}</div>
+        <div style="width:46px;height:46px;border-radius:13px;background:${p.color||'#eee'}33;display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden">${prodIcono(p,21)}</div>
         <div style="flex:1;min-width:0">
           <div style="font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.nombre}</div>
           <div style="display:flex;gap:6px;align-items:center">
@@ -1131,12 +1137,28 @@ const EMOJIS = ['📦','🛒','🍎','🥤','🍫','🧴','🧼','👕','👟','
 const COLORES = ['#B5D4F4','#9FE1CB','#FAC775','#F4C0D1','#C0DD97','#F5C4B3','#CECBF6','#85B7EB'];
 
 window.abrirNuevoProducto = function(){
-  S.prodForm = { id:null, nombre:'', precio:'', costo:'', emoji:'📦', color:'#B5D4F4', controla_stock:false, stock:'0', stock_minimo:'5', categoria_id: S.categorias[0]?.id||null };
+  S.prodForm = { id:null, nombre:'', precio:'', costo:'', emoji:'📦', color:'#B5D4F4', foto_url:null, controla_stock:false, stock:'0', stock_minimo:'5', categoria_id: S.categorias[0]?.id||null };
   R();
 };
 window.abrirEditarProducto = function(pid){
   const p = S.productos.find(x=>x.id===pid);
-  S.prodForm = { id:p.id, nombre:p.nombre, precio:String(p.precio), costo:p.precio_costo!=null?String(p.precio_costo):'', emoji:p.emoji||'📦', color:p.color||'#B5D4F4', controla_stock:p.controla_stock, stock:String(p.stock||0), stock_minimo:String(p.stock_minimo||5), categoria_id:p.categoria_id };
+  S.prodForm = { id:p.id, nombre:p.nombre, precio:String(p.precio), costo:p.precio_costo!=null?String(p.precio_costo):'', emoji:p.emoji||'📦', color:p.color||'#B5D4F4', foto_url:p.foto_url||null, controla_stock:p.controla_stock, stock:String(p.stock||0), stock_minimo:String(p.stock_minimo||5), categoria_id:p.categoria_id };
+  R();
+};
+
+window.subirFotoProductoUI = async function(input){
+  const file = input.files[0];
+  if(!file) return;
+  if(file.size > 5*1024*1024){ alert('La imagen es muy grande. Máximo 5MB.'); return; }
+
+  S.subiendoFoto = true; R();
+  // Usamos un id temporal si el producto todavía no existe (alta nueva)
+  const productoIdTmp = S.prodForm.id || 'nuevo-' + Date.now();
+  const { url, error } = await DB.subirFotoProducto(S.negocio.id, productoIdTmp, file);
+  S.subiendoFoto = false;
+
+  if(error){ alert('No se pudo subir la foto: ' + error.message); R(); return; }
+  S.prodForm.foto_url = url;
   R();
 };
 
@@ -1162,18 +1184,30 @@ window.actualizarMargenUI = function(){
 
 function renderProductoForm(back){
   const f = S.prodForm; const isEdit = !!f.id;
+  const tieneFoto = !!f.foto_url;
   return `<div style="display:flex;flex-direction:column;flex:1;overflow:hidden">
     ${header(isEdit?'Editar artículo':'Nuevo artículo', { back: "S.prodForm=null;R()", right: isEdit?`<button onclick="eliminarProductoUI('${f.id}')" style="font-size:13px;font-weight:700;color:var(--danger);background:none;border:none">Eliminar</button>`:'' })}
     <div style="flex:1;overflow-y:auto;padding:14px var(--sp-4)">
-      <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:10px">
-        <div style="width:50px;height:50px;border-radius:14px;background:${f.color}33;display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0">${f.emoji}</div>
-        <div style="flex:1;display:grid;grid-template-columns:repeat(6,1fr);gap:4px">
-          ${EMOJIS.map(e=>`<div onclick="S.prodForm.emoji='${e}';R()" style="height:32px;border-radius:8px;border:2px solid ${f.emoji===e?A:'var(--ink-100)'};display:flex;align-items:center;justify-content:center;font-size:16px;cursor:pointer">${e}</div>`).join('')}
+
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
+        <div style="width:74px;height:74px;border-radius:18px;background:${tieneFoto?'var(--ink-100)':f.color+'33'};display:flex;align-items:center;justify-content:center;font-size:32px;flex-shrink:0;overflow:hidden;position:relative">
+          ${tieneFoto ? `<img src="${f.foto_url}" style="width:100%;height:100%;object-fit:cover">` : f.emoji}
+          ${S.subiendoFoto ? `<div style="position:absolute;inset:0;background:rgba(255,255,255,.8);display:flex;align-items:center;justify-content:center"><span class="spinner" style="border-top-color:${A};border-color:rgba(26,63,160,.2)"></span></div>` : ''}
         </div>
+        <div style="flex:1">
+          <input type="file" id="pf-foto-input" accept="image/*" capture="environment" style="display:none" onchange="subirFotoProductoUI(this)">
+          <button onclick="document.getElementById('pf-foto-input').click()" style="width:100%;padding:11px;background:var(--ink-100);border:none;border-radius:var(--r-sm);font-size:13px;font-weight:700;color:var(--ink-700);display:flex;align-items:center;justify-content:center;gap:7px;margin-bottom:7px"><i class="ti ti-camera"></i> ${tieneFoto?'Cambiar foto':'Subir foto'}</button>
+          ${tieneFoto ? `<button onclick="S.prodForm.foto_url=null;R()" style="width:100%;padding:8px;background:none;border:none;font-size:12px;font-weight:700;color:var(--danger)">Quitar foto y usar emoji</button>` : `<div style="font-size:11px;color:var(--ink-500);text-align:center">o elegí un emoji abajo</div>`}
+        </div>
+      </div>
+
+      ${!tieneFoto ? `
+      <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:4px;margin-bottom:10px">
+        ${EMOJIS.map(e=>`<div onclick="S.prodForm.emoji='${e}';R()" style="height:32px;border-radius:8px;border:2px solid ${f.emoji===e?A:'var(--ink-100)'};display:flex;align-items:center;justify-content:center;font-size:16px;cursor:pointer">${e}</div>`).join('')}
       </div>
       <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:5px;margin-bottom:16px">
         ${COLORES.map(c=>`<div onclick="S.prodForm.color='${c}';R()" style="height:26px;border-radius:7px;background:${c};cursor:pointer;border:${f.color===c?'2.5px solid var(--ink-900)':'none'}"></div>`).join('')}
-      </div>
+      </div>` : '<div style="margin-bottom:6px"></div>'}
       <div class="field"><label class="lbl">Nombre *</label><input id="pf-nombre" value="${f.nombre}" oninput="S.prodForm.nombre=this.value" placeholder="Nombre del producto"></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="field"><label class="lbl">Precio de venta *</label><input id="pf-precio" type="text" inputmode="decimal" value="${f.precio}" oninput="S.prodForm.precio=this.value;actualizarMargenUI()" placeholder="0" style="font-size:18px;font-weight:700"></div>
@@ -1201,7 +1235,7 @@ window.guardarProducto = async function(){
   if(!nombre || !precio){ alert('Completá nombre y precio.'); return; }
   const campos = {
     nombre, precio, precio_costo: costoVal ? parseFloat(costoVal) : null,
-    emoji: f.emoji, color: f.color, categoria_id: f.categoria_id,
+    emoji: f.emoji, color: f.color, foto_url: f.foto_url || null, categoria_id: f.categoria_id,
     controla_stock: f.controla_stock,
     stock: f.controla_stock ? (parseFloat(document.getElementById('pf-stock').value)||0) : 0,
     stock_minimo: f.controla_stock ? (parseFloat(document.getElementById('pf-min').value)||5) : 5,
