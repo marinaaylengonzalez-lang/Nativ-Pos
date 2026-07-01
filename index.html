@@ -163,6 +163,10 @@ async function pollItemsListos(){
   } catch(e){}
 }
 
+
+function invalidarCache(){
+  try { sessionStorage.removeItem('nativ_cache_' + S.negocio.id); } catch(e){}
+}
 async function boot(){
   try {
     const user = await DB.getSessionUser();
@@ -172,14 +176,35 @@ async function boot(){
     if(!negocio){ window.location.href = './auth.html'; return; }
     S.negocio = negocio;
 
-    const [empleados, productos, categorias, clientes, mesas, turno] = await Promise.all([
-      DB.listarEmpleados(negocio.id),
-      DB.listarProductos(negocio.id),
-      DB.listarCategorias(negocio.id),
-      DB.listarClientes(negocio.id),
-      DB.listarMesas(negocio.id),
-      DB.turnoAbierto(negocio.id),
-    ]);
+    // Cache de datos estáticos en sessionStorage para arranque más rápido.
+    // Los productos y mesas raramente cambian entre recargas dentro del mismo turno.
+    const cacheKey = 'nativ_cache_' + negocio.id;
+    let cache = null;
+    try { cache = JSON.parse(sessionStorage.getItem(cacheKey)); } catch(e){}
+
+    let empleados, productos, categorias, clientes, mesas, turno;
+    if(cache && cache.ts && (Date.now() - cache.ts < 5 * 60 * 1000)){
+      // Usar cache (máximo 5 minutos de antigüedad) para productos/mesas/categorias
+      empleados = cache.empleados;
+      productos = cache.productos;
+      categorias = cache.categorias;
+      clientes = cache.clientes;
+      mesas = cache.mesas;
+      // El turno siempre se consulta en vivo (puede haber cambiado)
+      turno = await DB.turnoAbierto(negocio.id);
+    } else {
+      // Primera carga o cache expirado: pedir todo en paralelo
+      [empleados, productos, categorias, clientes, mesas, turno] = await Promise.all([
+        DB.listarEmpleados(negocio.id),
+        DB.listarProductos(negocio.id),
+        DB.listarCategorias(negocio.id),
+        DB.listarClientes(negocio.id),
+        DB.listarMesas(negocio.id),
+        DB.turnoAbierto(negocio.id),
+      ]);
+      try { sessionStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), empleados, productos, categorias, clientes, mesas })); } catch(e){}
+    }
+
     S.empleados = empleados;
     S.productos = productos;
     S.categorias = categorias.length ? categorias : [{ id: null, nombre: 'General', color: '#B5D4F4' }];
@@ -558,6 +583,7 @@ function sheetCart(){
         <input type="text" inputmode="decimal" value="${S.disc||''}" oninput="S.disc=parseFloat(this.value)||0;R()" placeholder="0" style="width:60px;padding:6px 8px;font-size:13px;text-align:center">
         ${discAmt()>0?`<span style="font-size:12px;color:var(--danger);font-weight:700;margin-left:auto">−${f$(discAmt())}</span>`:''}
       </div>
+      ${(()=>{ const ivaPct = parseFloat(S.negocio.config?.impuesto_pct)||0; if(!ivaPct) return ''; const ivaAmt = Math.round(cartTotal()/(1+ivaPct/100)*(ivaPct/100)); return `<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--ink-500);font-weight:600;margin-bottom:4px"><span>IVA ${ivaPct}% incluido</span><span>${f$(ivaAmt)}</span></div>`; })()}
       <div style="display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid var(--ink-300);padding-top:8px;margin-top:6px">
         <span style="font-size:15px;font-weight:700">Total</span>
         <span style="font-size:26px;font-weight:800;color:var(--ink-900)">${f$(cartTotal())}</span>
@@ -575,11 +601,16 @@ function sheetCheckout(){
 }
 
 function sheetCheckoutMetodo(){
+  const cfg = S.negocio.config || {};
   const metodos = [
     {id:'efectivo', icon:'ti-cash', label:'Efectivo'},
     {id:'transferencia', icon:'ti-transfer', label:'Transfer.'},
     {id:'tarjeta', icon:'ti-credit-card', label:'Tarjeta'},
   ];
+  const monedas = [];
+  if(cfg.moneda_usd && cfg.tc_usd) monedas.push({id:'usd', icon:'ti-currency-dollar', label:`USD (×${cfg.tc_usd})`, tc: cfg.tc_usd});
+  if(cfg.moneda_brl && cfg.tc_brl) monedas.push({id:'brl', icon:'ti-currency-real', label:`BRL (×${cfg.tc_brl})`, tc: cfg.tc_brl});
+
   return sheetBg(`
     <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
       <span style="font-size:17px;font-weight:800">Cobrar</span>
@@ -593,10 +624,14 @@ function sheetCheckoutMetodo(){
         <span style="font-size:12px;font-weight:700;color:var(--ink-700)">${m.label}</span>
       </div>`).join('')}
     </div>
-    ${S.clientes.length ? `<div onclick="S.pm='ctacte';S.cstep='ctacte';S.selCliente=null;S.csq='';R()" style="display:flex;align-items:center;gap:13px;padding:15px;border-radius:var(--r-md);background:var(--warn-soft)">
+    ${S.clientes.length ? `<div onclick="S.pm='ctacte';S.cstep='ctacte';S.selCliente=null;S.csq='';R()" style="display:flex;align-items:center;gap:13px;padding:14px;border-radius:var(--r-md);background:var(--warn-soft);margin-bottom:8px">
       <div style="width:38px;height:38px;border-radius:11px;background:#fde0b4;display:flex;align-items:center;justify-content:center;font-size:18px;color:var(--warn)"><i class="ti ti-user-dollar"></i></div>
       <div><div style="font-size:14px;font-weight:800;color:var(--warn)">Cuenta corriente</div><div style="font-size:11px;color:var(--ink-500);font-weight:600">Cargar a un cliente</div></div>
     </div>` : ''}
+    ${monedas.map(m=>`<div onclick="S.pm='${m.id}';S.pmTc=${m.tc};S.cstep='confirm';R()" style="display:flex;align-items:center;gap:13px;padding:14px;border-radius:var(--r-md);background:var(--brand-soft);margin-bottom:8px">
+      <div style="width:38px;height:38px;border-radius:11px;background:#d7e0f7;display:flex;align-items:center;justify-content:center;font-size:18px;color:var(--brand)"><i class="ti ${m.icon}"></i></div>
+      <div><div style="font-size:14px;font-weight:800;color:var(--brand-deep)">${m.label}</div><div style="font-size:11px;color:var(--ink-500);font-weight:600">${f$(cartTotal())} ÷ ${m.tc} = ${(cartTotal()/m.tc).toFixed(2)} ${m.id.toUpperCase()}</div></div>
+    </div>`).join('')}
   `);
 }
 
@@ -1115,18 +1150,19 @@ function renderProductos(back){
       : S.productos.map(p => {
         const tieneMargen = p.precio_costo != null && p.precio_costo > 0;
         const margenPct = tieneMargen ? Math.round((p.precio-p.precio_costo)/p.precio*100) : null;
+        const esDueno = S.empleadoActivo?.rol === 'dueno';
         return `<div onclick="abrirEditarProducto('${p.id}')" class="card" style="display:flex;align-items:center;gap:12px;padding:12px 14px;margin-bottom:9px;cursor:pointer">
         <div style="width:46px;height:46px;border-radius:13px;background:${p.color||'#eee'}33;display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden">${prodIcono(p,21)}</div>
         <div style="flex:1;min-width:0">
           <div style="font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.nombre}</div>
           <div style="display:flex;gap:6px;align-items:center">
             ${p.controla_stock?`<span style="font-size:11px;font-weight:700;color:${p.stock<=p.stock_minimo?'var(--warn)':'var(--ink-500)'}">${p.stock} u.</span>`:''}
-            ${tieneMargen?`<span style="font-size:11px;font-weight:700;color:${margenPct>=40?'var(--money)':margenPct>=20?'var(--warn)':'var(--danger)'}">${margenPct}% margen</span>`:''}
+            ${tieneMargen && esDueno ?`<span style="font-size:11px;font-weight:700;color:${margenPct>=40?'var(--money)':margenPct>=20?'var(--warn)':'var(--danger)'}">${margenPct}% margen</span>`:''}
           </div>
         </div>
         <div style="text-align:right">
           <div style="font-size:15px;font-weight:800;color:${A}">${f$(p.precio)}</div>
-          ${tieneMargen?`<div style="font-size:10px;color:var(--ink-500)">costo ${f$(p.precio_costo)}</div>`:''}
+          ${tieneMargen && esDueno ?`<div style="font-size:10px;color:var(--ink-500)">costo ${f$(p.precio_costo)}</div>`:''}
         </div>
       </div>`;}).join('')}
     </div>
@@ -1146,20 +1182,63 @@ window.abrirEditarProducto = function(pid){
   R();
 };
 
+// Comprime una imagen en el navegador antes de subirla, redimensionando
+// el lado más largo a `maxDim` px y reexportando como JPEG con calidad reducida.
+// Esto cuida el límite gratuito de Storage en Supabase (1GB / 2GB bandwidth):
+// una foto de cámara sin comprimir puede pesar 3-8MB; comprimida queda en 80-200KB.
+function comprimirImagen(file, maxDim = 800, calidad = 0.78){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = (e) => { img.src = e.target.result; };
+    reader.onerror = reject;
+    img.onload = () => {
+      let { width, height } = img;
+      if(width > height && width > maxDim){
+        height = Math.round(height * (maxDim / width));
+        width = maxDim;
+      } else if(height > maxDim){
+        width = Math.round(width * (maxDim / height));
+        height = maxDim;
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob((blob) => {
+        if(!blob){ reject(new Error('No se pudo comprimir la imagen')); return; }
+        const nombreComprimido = (file.name || 'foto').replace(/\.[^.]+$/, '') + '.jpg';
+        resolve(new File([blob], nombreComprimido, { type: 'image/jpeg' }));
+      }, 'image/jpeg', calidad);
+    };
+    img.onerror = () => reject(new Error('No se pudo leer la imagen'));
+    reader.readAsDataURL(file);
+  });
+}
+
 window.subirFotoProductoUI = async function(input){
   const file = input.files[0];
   if(!file) return;
-  if(file.size > 5*1024*1024){ alert('La imagen es muy grande. Máximo 5MB.'); return; }
+  if(file.size > 15*1024*1024){ alert('La imagen es muy grande. Máximo 15MB.'); return; }
 
   S.subiendoFoto = true; R();
-  // Usamos un id temporal si el producto todavía no existe (alta nueva)
-  const productoIdTmp = S.prodForm.id || 'nuevo-' + Date.now();
-  const { url, error } = await DB.subirFotoProducto(S.negocio.id, productoIdTmp, file);
-  S.subiendoFoto = false;
+  try {
+    const fileComprimido = await comprimirImagen(file);
+    console.log(`[Nativ POS] Foto comprimida: ${(file.size/1024).toFixed(0)}KB → ${(fileComprimido.size/1024).toFixed(0)}KB`);
 
-  if(error){ alert('No se pudo subir la foto: ' + error.message); R(); return; }
-  S.prodForm.foto_url = url;
-  R();
+    // Usamos un id temporal si el producto todavía no existe (alta nueva)
+    const productoIdTmp = S.prodForm.id || 'nuevo-' + Date.now();
+    const { url, error } = await DB.subirFotoProducto(S.negocio.id, productoIdTmp, fileComprimido);
+    S.subiendoFoto = false;
+
+    if(error){ alert('No se pudo subir la foto: ' + error.message); R(); return; }
+    S.prodForm.foto_url = url;
+    R();
+  } catch(e){
+    S.subiendoFoto = false;
+    alert('No se pudo procesar la imagen: ' + e.message);
+    R();
+  }
 };
 
 function margenHTML(precioStr, costoStr){
@@ -1248,6 +1327,7 @@ window.guardarProducto = async function(){
     if(data) S.productos.push(data);
   }
   S.prodForm = null;
+  invalidarCache();
   R();
 };
 window.eliminarProductoUI = async function(pid){
@@ -1703,6 +1783,9 @@ function renderConfig(back){
       metodos: cfg.metodos || { efectivo:true, transferencia:true, tarjeta:true, ctacte:true },
       moneda_usd: !!cfg.moneda_usd,
       tc_usd: cfg.tc_usd || '',
+      moneda_brl: !!cfg.moneda_brl,
+      tc_brl: cfg.tc_brl || '',
+      impuesto_pct: cfg.impuesto_pct || '',
       ticket_pie: cfg.ticket_pie || '¡Gracias por su compra!',
     };
   }
@@ -1743,7 +1826,22 @@ function renderConfig(back){
           <div style="position:absolute;width:16px;height:16px;border-radius:50%;background:#fff;top:3px;left:${f.moneda_usd?21:3}px;transition:left .15s"></div>
         </div>
       </div>
-      ${f.moneda_usd ? `<div class="field"><label class="lbl">Tipo de cambio (1 USD = $ ARS)</label><input id="cfg-tc" type="text" inputmode="decimal" value="${f.tc_usd}" oninput="S.cfgForm.tc_usd=this.value" placeholder="Ej: 1450" style="margin-bottom:18px"></div>` : ''}
+      ${f.moneda_usd ? `<div class="field"><label class="lbl">Tipo de cambio (1 USD = $ ARS)</label><input id="cfg-tc-usd" type="text" inputmode="decimal" value="${f.tc_usd}" oninput="S.cfgForm.tc_usd=this.value" placeholder="Ej: 1450"></div>` : ''}
+
+      <div onclick="S.cfgForm.moneda_brl=!S.cfgForm.moneda_brl;R()" style="display:flex;align-items:center;justify-content:space-between;padding:13px 14px;background:var(--ink-100);border-radius:var(--r-md);margin-bottom:${f.moneda_brl?'10px':'18px'};cursor:pointer">
+        <div><div style="font-size:14px;font-weight:700">Aceptar Reales (BRL)</div><div style="font-size:11px;color:var(--ink-500)">Habilita cobro en reales brasileños</div></div>
+        <div style="width:40px;height:22px;border-radius:99px;background:${f.moneda_brl?A:'var(--ink-300)'};position:relative;flex-shrink:0">
+          <div style="position:absolute;width:16px;height:16px;border-radius:50%;background:#fff;top:3px;left:${f.moneda_brl?21:3}px;transition:left .15s"></div>
+        </div>
+      </div>
+      ${f.moneda_brl ? `<div class="field"><label class="lbl">Tipo de cambio (1 BRL = $ ARS)</label><input id="cfg-tc-brl" type="text" inputmode="decimal" value="${f.tc_brl}" oninput="S.cfgForm.tc_brl=this.value" placeholder="Ej: 220"></div>` : ''}
+
+      <div class="sec-label">Impuestos</div>
+      <div class="field" style="margin-bottom:18px">
+        <label class="lbl">IVA / Impuesto incluido en precios (%)</label>
+        <input id="cfg-impuesto" type="text" inputmode="decimal" value="${f.impuesto_pct}" oninput="S.cfgForm.impuesto_pct=this.value" placeholder="Ej: 21 (dejar vacío si no aplica)">
+        <div style="font-size:11px;color:var(--ink-500);margin-top:5px">Si lo completás, el ticket mostrará el desglose de IVA incluido en el precio.</div>
+      </div>
 
       <div class="sec-label">Ticket</div>
       <div class="field"><label class="lbl">Mensaje de pie del ticket</label><input id="cfg-pie" value="${f.ticket_pie}" oninput="S.cfgForm.ticket_pie=this.value" placeholder="¡Gracias por su compra!"></div>
@@ -1764,11 +1862,12 @@ window.guardarConfig = async function(){
   const f = S.cfgForm;
   const nombre = document.getElementById('cfg-nombre').value.trim();
   const ticket_pie = document.getElementById('cfg-pie').value.trim();
-  const tc_usd = f.moneda_usd ? (parseFloat(document.getElementById('cfg-tc')?.value) || 0) : 0;
+  const tc_usd = f.moneda_usd ? (parseFloat(document.getElementById('cfg-tc-usd')?.value) || 0) : 0;
+  const tc_brl = f.moneda_brl ? (parseFloat(document.getElementById('cfg-tc-brl')?.value) || 0) : 0;
+  const impuesto_pct = parseFloat(document.getElementById('cfg-impuesto')?.value) || 0;
 
   if(!nombre){ alert('El nombre del negocio no puede estar vacío.'); return; }
 
-  // Actualizar nombre del negocio (columna directa)
   if(nombre !== S.negocio.nombre){
     await DB.actualizarNegocio(S.negocio.id, { nombre, controla_stock: f.controla_stock });
     S.negocio.nombre = nombre;
@@ -1777,11 +1876,11 @@ window.guardarConfig = async function(){
   }
   S.negocio.controla_stock = f.controla_stock;
 
-  // Actualizar config (columna jsonb)
   const { data } = await DB.actualizarConfigNegocio(S.negocio.id, {
     metodos: f.metodos,
-    moneda_usd: f.moneda_usd,
-    tc_usd,
+    moneda_usd: f.moneda_usd, tc_usd,
+    moneda_brl: f.moneda_brl, tc_brl,
+    impuesto_pct,
     ticket_pie,
   });
   if(data) S.negocio.config = data.config;
