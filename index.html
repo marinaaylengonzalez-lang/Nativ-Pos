@@ -437,7 +437,7 @@ function renderTabBar(){
 }
 
 window.goTab = function(tab){
-  S.tab = tab; S.masScreen = null; S.repData = null; S.finData = null; S.recibosData = null; S.ventaSel = null;
+  S.tab = tab; S.masScreen = null; S.repData = null; S.finData = null; S.recibosData = null; S.ventaSel = null; S.prodRent = null;
   R();
   if(tab === 'mesas' && S.turno) pollItemsListos(); // refresco inmediato, no esperar el ciclo de 15s
 };
@@ -1141,30 +1141,115 @@ function renderMasScreen(){
 // ════════════════════════════════════════════════════════════
 // PRODUCTOS (alta/edición)
 // ════════════════════════════════════════════════════════════
+function calcRentabilidad(p){
+  // Calcula la rentabilidad real de un producto, descontando IVA del precio de venta.
+  const ivaPct = parseFloat(S.negocio.config?.impuesto_pct) || 0;
+  const precioNeto = ivaPct > 0 ? Math.round(p.precio / (1 + ivaPct/100)) : p.precio;
+  const ivaUnit = p.precio - precioNeto;
+  const costo = p.precio_costo || null;
+  const ganancia = costo != null ? precioNeto - costo : null;
+  const margenReal = ganancia != null && precioNeto > 0 ? Math.round(ganancia/precioNeto*100) : null;
+  const margenSinIva = costo != null && p.precio > 0 ? Math.round((p.precio-costo)/p.precio*100) : null;
+  return { precioNeto, ivaUnit, ivaPct, costo, ganancia, margenReal, margenSinIva };
+}
+
 function renderProductos(back){
   if(S.prodForm) return renderProductoForm(back);
+  if(S.prodRent) return renderRentabilidadProducto(back);
+
+  const esDueno = S.empleadoActivo?.rol === 'dueno';
   return `<div style="display:flex;flex-direction:column;flex:1;overflow:hidden">
     ${header('Artículos', { back, right: `<button onclick="abrirNuevoProducto()" style="width:36px;height:36px;border-radius:99px;background:${A};border:none;color:#fff;font-size:17px"><i class="ti ti-plus"></i></button>` })}
     <div style="flex:1;overflow-y:auto;padding:12px var(--sp-4)">
       ${!S.productos.length ? `<div style="text-align:center;padding:40px;color:var(--ink-500)"><i class="ti ti-package" style="font-size:36px;display:block;margin-bottom:10px"></i><p style="font-size:13px">Tocá + para agregar tu primer artículo.</p></div>`
       : S.productos.map(p => {
-        const tieneMargen = p.precio_costo != null && p.precio_costo > 0;
-        const margenPct = tieneMargen ? Math.round((p.precio-p.precio_costo)/p.precio*100) : null;
-        const esDueno = S.empleadoActivo?.rol === 'dueno';
-        return `<div onclick="abrirEditarProducto('${p.id}')" class="card" style="display:flex;align-items:center;gap:12px;padding:12px 14px;margin-bottom:9px;cursor:pointer">
-        <div style="width:46px;height:46px;border-radius:13px;background:${p.color||'#eee'}33;display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden">${prodIcono(p,21)}</div>
-        <div style="flex:1;min-width:0">
+        const r = calcRentabilidad(p);
+        const colorMargen = r.margenReal>=40?'var(--money)':r.margenReal>=20?'var(--warn)':'var(--danger)';
+        return `<div class="card" style="display:flex;align-items:center;gap:12px;padding:12px 14px;margin-bottom:9px">
+        <div onclick="abrirEditarProducto('${p.id}')" style="width:46px;height:46px;border-radius:13px;background:${p.color||'#eee'}33;display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden;cursor:pointer">${prodIcono(p,21)}</div>
+        <div onclick="abrirEditarProducto('${p.id}')" style="flex:1;min-width:0;cursor:pointer">
           <div style="font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.nombre}</div>
-          <div style="display:flex;gap:6px;align-items:center">
+          <div style="display:flex;gap:6px;align-items:center;margin-top:2px">
             ${p.controla_stock?`<span style="font-size:11px;font-weight:700;color:${p.stock<=p.stock_minimo?'var(--warn)':'var(--ink-500)'}">${p.stock} u.</span>`:''}
-            ${tieneMargen && esDueno ?`<span style="font-size:11px;font-weight:700;color:${margenPct>=40?'var(--money)':margenPct>=20?'var(--warn)':'var(--danger)'}">${margenPct}% margen</span>`:''}
+            ${r.margenReal!=null && esDueno?`<span style="font-size:11px;font-weight:700;color:${colorMargen}">${r.margenReal}% real</span>`:''}
           </div>
         </div>
         <div style="text-align:right">
           <div style="font-size:15px;font-weight:800;color:${A}">${f$(p.precio)}</div>
-          ${tieneMargen && esDueno ?`<div style="font-size:10px;color:var(--ink-500)">costo ${f$(p.precio_costo)}</div>`:''}
+          ${r.costo!=null && esDueno?`<div style="font-size:10px;color:var(--ink-500)">costo ${f$(r.costo)}</div>`:''}
         </div>
+        ${esDueno?`<button onclick="S.prodRent='${p.id}';R()" style="width:34px;height:34px;background:var(--ink-100);border:none;border-radius:99px;color:var(--ink-700);font-size:14px;flex-shrink:0"><i class="ti ti-chart-bar"></i></button>`:''}
       </div>`;}).join('')}
+    </div>
+  </div>`;
+}
+
+function renderRentabilidadProducto(back){
+  const p = S.productos.find(x=>x.id===S.prodRent);
+  if(!p){ S.prodRent=null; R(); return ''; }
+  const r = calcRentabilidad(p);
+  const colorMargen = r.margenReal!=null?(r.margenReal>=40?'var(--money)':r.margenReal>=20?'var(--warn)':'var(--danger)'):'var(--ink-500)';
+  const sinCosto = r.costo == null;
+
+  return `<div style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+    ${header(p.nombre, { back: "S.prodRent=null;R()" })}
+    <div style="flex:1;overflow-y:auto;padding:14px var(--sp-4)">
+
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px">
+        <div style="width:60px;height:60px;border-radius:16px;background:${p.color||'#eee'}33;display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden">${prodIcono(p,26)}</div>
+        <div>
+          <div style="font-size:18px;font-weight:800">${p.nombre}</div>
+          <div style="font-size:13px;color:var(--ink-500)">Precio de venta: ${f$(p.precio)}</div>
+        </div>
+      </div>
+
+      <div class="sec-label">Desglose por unidad vendida</div>
+      <div class="card" style="overflow:hidden;margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--ink-100)">
+          <span style="font-size:14px;font-weight:600;color:var(--ink-700)">Precio de venta</span>
+          <span style="font-size:14px;font-weight:800">${f$(p.precio)}</span>
+        </div>
+        ${r.ivaPct>0?`<div style="display:flex;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--ink-100);background:var(--danger-soft)">
+          <div><span style="font-size:14px;font-weight:600;color:var(--danger)">IVA ${r.ivaPct}% (AFIP)</span><div style="font-size:10px;color:var(--ink-500)">no es tuyo</div></div>
+          <span style="font-size:14px;font-weight:800;color:var(--danger)">−${f$(r.ivaUnit)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--ink-100)">
+          <span style="font-size:14px;font-weight:600;color:${A}">Precio neto (tuyo)</span>
+          <span style="font-size:14px;font-weight:800;color:${A}">${f$(r.precioNeto)}</span>
+        </div>`:''}
+        ${r.costo!=null?`<div style="display:flex;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--ink-100)">
+          <span style="font-size:14px;font-weight:600;color:var(--ink-700)">Costo del producto</span>
+          <span style="font-size:14px;font-weight:800;color:var(--ink-700)">−${f$(r.costo)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:14px 14px;background:${r.ganancia>=0?'var(--money-soft)':'var(--danger-soft)'}">
+          <span style="font-size:15px;font-weight:800;color:${r.ganancia>=0?'var(--money-deep)':'var(--danger)'}">${r.ganancia>=0?'Ganancia real':'Pérdida'} por unidad</span>
+          <span style="font-size:18px;font-weight:800;color:${r.ganancia>=0?'var(--money-deep)':'var(--danger)'}">${f$(r.ganancia)}</span>
+        </div>`
+        :`<div style="padding:14px;text-align:center;color:var(--ink-500);font-size:13px">Sin costo cargado — <button onclick="abrirEditarProducto('${p.id}')" style="background:none;border:none;color:${A};font-weight:700;font-size:13px">agregar costo</button></div>`}
+      </div>
+
+      ${r.margenReal!=null?`
+      <div style="background:${colorMargen.includes('money')?'var(--money-soft)':colorMargen.includes('warn')?'var(--warn-soft)':'var(--danger-soft)'};border-radius:var(--r-md);padding:14px;display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <div>
+          <div style="font-size:12px;color:var(--ink-700);font-weight:600">Margen real${r.ivaPct>0?' (sobre precio neto)':''}</div>
+          <div style="font-size:34px;font-weight:800;color:${colorMargen}">${r.margenReal}%</div>
+          <div style="font-size:11px;color:var(--ink-500)">${r.margenReal>=40?'Muy saludable':r.margenReal>=20?'Aceptable, podés mejorar':'Bajo — revisá el precio o costo'}</div>
+        </div>
+        <div style="font-size:42px">${r.margenReal>=40?'💚':r.margenReal>=20?'⚠️':'🔴'}</div>
+      </div>
+      ${r.ivaPct>0?`<div class="card" style="padding:13px 14px;margin-bottom:14px">
+        <div style="font-size:12px;color:var(--ink-500);margin-bottom:6px">Comparativa de margen</div>
+        <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-bottom:1px solid var(--ink-100)">
+          <span style="color:var(--ink-700)">Sin descontar IVA (precio bruto)</span><span style="font-weight:700;color:var(--ink-500)">${r.margenSinIva}%</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0">
+          <span style="color:var(--ink-700);font-weight:700">Real (descontando IVA)</span><span style="font-weight:800;color:${colorMargen}">${r.margenReal}%</span>
+        </div>
+        <div style="font-size:11px;color:var(--danger);margin-top:6px">El IVA te reduce el margen real ${r.margenSinIva-r.margenReal} puntos porcentuales.</div>
+      </div>`:''}
+      `:''}
+
+      <button onclick="abrirEditarProducto('${p.id}')" class="btn-primary"><i class="ti ti-edit"></i> Editar este artículo</button>
     </div>
   </div>`;
 }
@@ -1596,10 +1681,27 @@ async function cargarFinanzas(){
   ]);
 
   const hoy = new Date().toDateString();
-  const ventasHoy = ventasMes.filter(v => new Date(v.ts).toDateString() === hoy).reduce((a,v)=>a+v.total,0);
-  const totalVentasMes = ventasMes.reduce((a,v)=>a+v.total,0);
+  const ivaPct = parseFloat(S.negocio.config?.impuesto_pct) || 0;
+  // Cuando el IVA está configurado, lo separamos del ingreso bruto.
+  // Los precios de venta ya incluyen IVA ("precios con IVA"), así que:
+  // ingreso neto = total ÷ (1 + ivaPct/100)
+  // iva acumulado = total - ingreso neto
+  const divisorIva = ivaPct > 0 ? (1 + ivaPct / 100) : 1;
 
-  // Costo de mercadería vendida: cruzamos cada item de venta con el precio_costo actual del producto
+  let totalVentasMes = 0, totalVentasNeto = 0, ivaAcumuladoMes = 0;
+  let ventasHoy = 0, ventasNetoHoy = 0, ivaHoy = 0;
+
+  ventasMes.forEach(v => {
+    const esHoy = new Date(v.ts).toDateString() === hoy;
+    const neto = Math.round(v.total / divisorIva);
+    const iva = v.total - neto;
+    totalVentasMes += v.total;
+    totalVentasNeto += neto;
+    ivaAcumuladoMes += iva;
+    if(esHoy){ ventasHoy += v.total; ventasNetoHoy += neto; ivaHoy += iva; }
+  });
+
+  // Costo de mercadería vendida
   const costoMap = {};
   S.productos.forEach(p => { if(p.precio_costo != null) costoMap[p.id] = p.precio_costo; });
   let costoMercaderia = 0, costoMercaderiaHoy = 0;
@@ -1615,7 +1717,13 @@ async function cargarFinanzas(){
     });
   });
 
-  S.finData = { gastosFijos, gastosVar, ventasMes, ventasHoy, totalVentasMes, costoMercaderia, costoMercaderiaHoy };
+  S.finData = {
+    gastosFijos, gastosVar, ventasMes,
+    ventasHoy, ventasNetoHoy, ivaHoy,
+    totalVentasMes, totalVentasNeto, ivaAcumuladoMes,
+    costoMercaderia, costoMercaderiaHoy,
+    ivaPct,
+  };
   R();
 }
 
@@ -1624,8 +1732,9 @@ function diaActFin(){ return new Date().getDate(); }
 function totalFijosFin(){ return (S.finData.gastosFijos||[]).reduce((a,g)=>a+g.monto,0); }
 function totalVarFin(){ return (S.finData.gastosVar||[]).reduce((a,g)=>a+g.monto,0); }
 function costoMercaderiaFin(){ return S.finData.costoMercaderia || 0; }
-function gananciaFin(){ return S.finData.totalVentasMes - totalFijosFin() - totalVarFin() - costoMercaderiaFin(); }
-function margenFin(){ const v=S.finData.totalVentasMes; return v ? Math.round(gananciaFin()/v*100) : 0; }
+// La ganancia real se calcula sobre el ingreso NETO (sin IVA), no el bruto
+function gananciaFin(){ return S.finData.totalVentasNeto - totalFijosFin() - totalVarFin() - costoMercaderiaFin(); }
+function margenFin(){ const v=S.finData.totalVentasNeto; return v ? Math.round(gananciaFin()/v*100) : 0; }
 function promDiarioFin(){
   const byDay = {};
   S.finData.ventasMes.forEach(v=>{ const d=new Date(v.ts).toDateString(); byDay[d]=(byDay[d]||0)+v.total; });
@@ -1634,11 +1743,18 @@ function promDiarioFin(){
 }
 
 function finDash(){
-  const gf = totalFijosFin(), gv = totalVarFin(), cm = costoMercaderiaFin(), vm = S.finData.totalVentasMes, gan = gananciaFin(), mg = margenFin();
+  const gf = totalFijosFin(), gv = totalVarFin(), cm = costoMercaderiaFin();
+  const vm = S.finData.totalVentasMes;         // ingresos brutos (con IVA)
+  const vmNeto = S.finData.totalVentasNeto;    // ingresos netos (sin IVA)
+  const iva = S.finData.ivaAcumuladoMes || 0; // IVA del mes a remitir a AFIP
+  const ivaPct = S.finData.ivaPct || 0;
+  const gan = gananciaFin(), mg = margenFin(); // ya calculados sobre neto
   const vh = S.finData.ventasHoy;
+  const vhNeto = S.finData.ventasNetoHoy || vh;
+  const ivaHoy = S.finData.ivaHoy || 0;
   const cmHoy = S.finData.costoMercaderiaHoy || 0;
   const gastoDia = Math.round(gf/diasMesFin() + gv/Math.max(1,diaActFin())) + cmHoy;
-  const ganHoy = vh - gastoDia;
+  const ganHoy = vhNeto - gastoDia;
   const pctMes = Math.min(100, Math.round(diaActFin()/diasMesFin()*100));
   const sinCostos = S.productos.filter(p=>p.precio_costo==null).length;
 
@@ -1648,25 +1764,39 @@ function finDash(){
     <span style="font-size:12px;font-weight:600;color:var(--warn)">${sinCostos} artículo${sinCostos>1?'s':''} sin costo cargado — la ganancia real puede ser menor</span>
   </div>`:''}
   <div style="background:${A};border-radius:12px;padding:14px;margin-bottom:14px">
-    <div style="font-size:13px;color:rgba(255,255,255,.7);margin-bottom:10px">Hoy</div>
+    <div style="font-size:13px;color:rgba(255,255,255,.7);margin-bottom:10px">Hoy${ivaPct>0?' · ingreso neto':''}</div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-      <div style="background:rgba(255,255,255,.15);border-radius:9px;padding:10px"><div style="font-size:11px;color:rgba(255,255,255,.7)">Ventas</div><div style="font-size:16px;font-weight:800;color:#fff">${f$(vh)}</div></div>
+      <div style="background:rgba(255,255,255,.15);border-radius:9px;padding:10px"><div style="font-size:11px;color:rgba(255,255,255,.7)">${ivaPct>0?'Neto':'Ventas'}</div><div style="font-size:16px;font-weight:800;color:#fff">${f$(ivaPct>0?vhNeto:vh)}</div></div>
       <div style="background:rgba(255,255,255,.15);border-radius:9px;padding:10px"><div style="font-size:11px;color:rgba(255,255,255,.7)">Gastos</div><div style="font-size:16px;font-weight:800;color:#fca5a5">${f$(gastoDia)}</div></div>
       <div style="background:rgba(255,255,255,.15);border-radius:9px;padding:10px"><div style="font-size:11px;color:rgba(255,255,255,.7)">Result.</div><div style="font-size:16px;font-weight:800;color:${ganHoy>=0?'#86efac':'#fca5a5'}">${f$(ganHoy)}</div></div>
     </div>
   </div>
   <div class="card" style="padding:14px;margin-bottom:14px">
-    <div style="display:flex;justify-content:space-between;margin-bottom:10px">
-      <div><div style="font-size:12px;color:var(--ink-500)">Ingresos mes</div><div style="font-size:22px;font-weight:800;color:${A}">${f$(vm)}</div></div>
-      <div style="text-align:right"><div style="font-size:12px;color:var(--ink-500)">Resultado real</div><div style="font-size:22px;font-weight:800;color:${gan>=0?MONEY:'var(--danger)'}">${gan>=0?'+':''}${f$(gan)}</div></div>
+    <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+      <div>
+        <div style="font-size:11px;color:var(--ink-500)">Ventas brutas</div>
+        <div style="font-size:20px;font-weight:800;color:var(--ink-700)">${f$(vm)}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:11px;color:var(--ink-500)">Resultado real</div>
+        <div style="font-size:20px;font-weight:800;color:${gan>=0?MONEY:'var(--danger)'}">${gan>=0?'+':''}${f$(gan)}</div>
+      </div>
     </div>
+    ${ivaPct>0?`<div style="background:var(--danger-soft);border-radius:var(--r-sm);padding:9px 12px;display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div><div style="font-size:11px;color:var(--danger);font-weight:700">IVA ${ivaPct}% a remitir a AFIP</div><div style="font-size:10px;color:var(--ink-500)">No es ganancia tuya</div></div>
+      <span style="font-size:14px;font-weight:800;color:var(--danger)">−${f$(iva)}</span>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:10px;padding:0 2px">
+      <span style="color:var(--ink-700);font-weight:600">Ingreso neto (sin IVA)</span>
+      <span style="font-weight:800;color:${A}">${f$(vmNeto)}</span>
+    </div>`:''}
     <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--ink-500);margin-bottom:4px"><span>Avance del mes</span><span>${pctMes}%</span></div>
     <div style="height:7px;border-radius:99px;background:var(--ink-100);overflow:hidden;margin-bottom:10px"><div style="height:100%;background:${A};width:${pctMes}%"></div></div>
-    ${[['Costo de mercadería',cm,'#8b5cf6',vm?Math.round(cm/vm*100):0],['Gastos fijos',gf,'var(--danger)',vm?Math.round(gf/vm*100):0],['Gastos variables',gv,'var(--warn)',vm?Math.round(gv/vm*100):0],['Ganancia neta',Math.max(0,gan),MONEY,Math.max(0,mg)]].map(([l,v,c,p])=>`
+    ${[['Costo de mercadería',cm,'#8b5cf6',vmNeto?Math.round(cm/vmNeto*100):0],['Gastos fijos',gf,'var(--danger)',vmNeto?Math.round(gf/vmNeto*100):0],['Gastos variables',gv,'var(--warn)',vmNeto?Math.round(gv/vmNeto*100):0],['Ganancia neta',Math.max(0,gan),MONEY,Math.max(0,mg)]].map(([l,v,c,p])=>`
       <div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px"><span style="color:var(--ink-700)">${l}</span><span style="font-weight:700;color:${c}">${f$(v)} (${p}%)</span></div><div style="height:6px;border-radius:99px;background:var(--ink-100);overflow:hidden"><div style="height:100%;background:${c};width:${Math.min(100,p)}%"></div></div></div>`).join('')}
   </div>
   <div style="background:${mg>=20?'var(--money-soft)':mg>=10?'var(--warn-soft)':'var(--danger-soft)'};border-radius:12px;padding:14px;display:flex;justify-content:space-between;align-items:center">
-    <div><div style="font-size:12px;color:var(--ink-700)">Margen de ganancia real</div><div style="font-size:30px;font-weight:800;color:${mg>=20?MONEY:mg>=10?'var(--warn)':'var(--danger)'}">${mg}%</div><div style="font-size:12px;color:var(--ink-500)">${mg>=20?'Saludable':mg>=10?'Ajustado':'Bajo'}</div></div>
+    <div><div style="font-size:12px;color:var(--ink-700)">Margen real ${ivaPct>0?'(sobre ingreso neto)':''}</div><div style="font-size:30px;font-weight:800;color:${mg>=20?MONEY:mg>=10?'var(--warn)':'var(--danger)'}">${mg}%</div><div style="font-size:12px;color:var(--ink-500)">${mg>=20?'Saludable':mg>=10?'Ajustado':'Bajo'}</div></div>
     <div style="font-size:38px">${mg>=20?'💚':mg>=10?'⚠️':'🔴'}</div>
   </div>`;
 }
