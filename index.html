@@ -908,6 +908,7 @@ function renderComanda(){
           <div style="width:26px;text-align:center;font-size:14px;font-weight:800;color:var(--ink-700)">${p.cantidad}×</div>
           <div style="flex:1">
             <div style="font-size:14px;font-weight:700">${p.nombre_producto}</div>
+            ${(p.modificadores||[]).length?`<div style="font-size:11px;color:var(--ink-500);margin-top:2px">${(p.modificadores||[]).map(m=>m.opciones.join(', ')).join(' · ')}</div>`:''}
             <div style="font-size:11px;color:${e.color};font-weight:700">${e.label}</div>
           </div>
           <div style="font-size:15px;font-weight:800;min-width:62px;text-align:right">${f$(p.precio_unitario*p.cantidad)}</div>
@@ -937,23 +938,38 @@ window.borrarPedidoUI = async function(pid){
 };
 
 function sheetAgregarAMesa(){
-  // Paso 2: ya elegiste el producto, ahora elegís la cantidad
+  // Paso 2: producto elegido → cantidad + modificadores
   if(S.mesaAddSel){
     const p = S.productos.find(x=>x.id===S.mesaAddSel);
     const cant = S.mesaAddCant || 1;
+    const mods = S.mesaAddMods || {};  // { grupoId: [opcionId, ...] }
+    const grupos = S.mesaAddGrupos || [];
+
+    // Verificar si todos los grupos obligatorios tienen selección
+    const faltanObligatorios = grupos.filter(g=>g.requerido && !(mods[g.id]?.length));
+
     return sheetBg(`
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
-        <button onclick="S.mesaAddSel=null;R()" style="width:34px;height:34px;background:var(--ink-100);border:none;border-radius:50%"><i class="ti ti-arrow-left"></i></button>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        <button onclick="S.mesaAddSel=null;S.mesaAddMods={};S.mesaAddGrupos=[];R()" style="width:34px;height:34px;background:var(--ink-100);border:none;border-radius:50%"><i class="ti ti-arrow-left"></i></button>
         <span style="font-size:16px;font-weight:800">${p.nombre}</span>
       </div>
-      <div style="text-align:center;margin-bottom:8px"><div style="font-size:13px;color:var(--ink-500);font-weight:600">Precio unitario</div><div style="font-size:20px;font-weight:800;color:${A}">${f$(p.precio)}</div></div>
-      <div style="display:flex;align-items:center;justify-content:center;gap:20px;margin:24px 0">
-        <button onclick="S.mesaAddCant=Math.max(1,(S.mesaAddCant||1)-1);R()" style="width:48px;height:48px;border-radius:50%;background:var(--ink-100);border:none;font-size:22px;font-weight:800">−</button>
-        <span style="font-size:32px;font-weight:800;min-width:50px;text-align:center">${cant}</span>
-        <button onclick="S.mesaAddCant=(S.mesaAddCant||1)+1;R()" style="width:48px;height:48px;border-radius:50%;background:var(--ink-100);border:none;font-size:22px;font-weight:800">+</button>
+      <div style="display:flex;align-items:center;justify-content:center;gap:20px;margin:16px 0">
+        <button onclick="S.mesaAddCant=Math.max(1,(S.mesaAddCant||1)-1);R()" style="width:46px;height:46px;border-radius:50%;background:var(--ink-100);border:none;font-size:22px;font-weight:800">−</button>
+        <span style="font-size:30px;font-weight:800;min-width:50px;text-align:center">${cant}</span>
+        <button onclick="S.mesaAddCant=(S.mesaAddCant||1)+1;R()" style="width:46px;height:46px;border-radius:50%;background:var(--ink-100);border:none;font-size:22px;font-weight:800">+</button>
       </div>
-      <div style="text-align:center;margin-bottom:20px"><span style="font-size:14px;color:var(--ink-500)">Subtotal</span> <span style="font-size:18px;font-weight:800">${f$(p.precio*cant)}</span></div>
-      <button class="btn-primary" onclick="confirmarAgregarAMesa()"><i class="ti ti-check"></i> Agregar a la comanda</button>
+      ${grupos.length ? grupos.map(g=>`
+        <div style="margin-bottom:12px">
+          <div style="font-size:13px;font-weight:700;color:var(--ink-700);margin-bottom:7px">${g.nombre}${g.requerido?'<span style="color:var(--danger);margin-left:4px">*</span>':''}</div>
+          <div style="display:flex;flex-wrap:wrap;gap:7px">
+            ${(g.modificador_opciones||[]).map(o=>{
+              const sel = (mods[g.id]||[]).includes(o.id);
+              return `<div onclick="toggleMesaMod('${g.id}','${o.id}',${g.multiple})" style="padding:8px 14px;border-radius:99px;font-size:13px;font-weight:700;border:2px solid ${sel?A:'var(--ink-200)'};background:${sel?'var(--brand-soft)':'#fff'};color:${sel?A:'var(--ink-700)'};cursor:pointer">${o.nombre}</div>`;
+            }).join('')}
+          </div>
+          ${g.requerido&&!(mods[g.id]?.length)?'<div style="font-size:11px;color:var(--danger);margin-top:4px">Seleccioná una opción</div>':''}
+        </div>`).join('') : ''}
+      <button class="btn-primary" style="margin-top:8px" onclick="confirmarAgregarAMesa()" ${faltanObligatorios.length?'disabled style="opacity:.5"':''}><i class="ti ti-check"></i> Agregar a la comanda</button>
     `);
   }
 
@@ -966,7 +982,7 @@ function sheetAgregarAMesa(){
     </div>
     <input value="${S.mesaFq}" oninput="S.mesaFq=this.value;R()" placeholder="Buscar producto..." style="margin-bottom:12px">
     <div style="max-height:340px;overflow-y:auto">
-      ${fil.map(p => `<div onclick="S.mesaAddSel='${p.id}';S.mesaAddCant=1;R()" style="display:flex;align-items:center;gap:11px;padding:10px 4px;border-bottom:1px solid var(--ink-100);cursor:pointer">
+      ${fil.map(p => `<div onclick="seleccionarProductoMesa('${p.id}')" style="display:flex;align-items:center;gap:11px;padding:10px 4px;border-bottom:1px solid var(--ink-100);cursor:pointer">
         <div style="width:40px;height:40px;border-radius:11px;background:${p.color||'#eee'}33;display:flex;align-items:center;justify-content:center;overflow:hidden">${prodIcono(p,18)}</div>
         <span style="flex:1;font-size:14px;font-weight:700">${p.nombre}</span>
         <span style="font-size:14px;font-weight:800;color:${A}">${f$(p.precio)}</span>
@@ -975,16 +991,56 @@ function sheetAgregarAMesa(){
   `);
 }
 
+// Cargar modificadores al seleccionar un producto en mesas
+window.seleccionarProductoMesa = async function(pid){
+  S.mesaAddSel = pid;
+  S.mesaAddCant = 1;
+  S.mesaAddMods = {};
+  S.mesaAddGrupos = await DB.listarModificadoresProducto(pid);
+  R();
+};
+
+window.toggleMesaMod = function(grupoId, opcionId, multiple){
+  const mods = S.mesaAddMods || {};
+  const actual = mods[grupoId] || [];
+  if(multiple){
+    S.mesaAddMods = { ...mods, [grupoId]: actual.includes(opcionId) ? actual.filter(x=>x!==opcionId) : [...actual, opcionId] };
+  } else {
+    S.mesaAddMods = { ...mods, [grupoId]: actual.includes(opcionId) ? [] : [opcionId] };
+  }
+  R();
+};
+
 window.confirmarAgregarAMesa = async function(){
   const p = S.productos.find(x=>x.id===S.mesaAddSel);
   const cant = S.mesaAddCant || 1;
-  await DB.agregarPedidoMesaConCantidad(S.mesaSel, S.negocio.id, S.empleadoActivo.id, p, cant);
+  const grupos = S.mesaAddGrupos || [];
+  const mods = S.mesaAddMods || {};
+
+  // Construir resumen de modificadores para guardar y mostrar en comanda
+  const modsResumen = grupos
+    .filter(g => mods[g.id]?.length)
+    .map(g => ({
+      grupo: g.nombre,
+      opciones: (mods[g.id]||[]).map(oid => {
+        const op = (g.modificador_opciones||[]).find(o=>o.id===oid);
+        return op?.nombre || '';
+      }).filter(Boolean)
+    }));
+
+  const { data: pedido } = await DB.agregarPedidoMesaConCantidad(S.mesaSel, S.negocio.id, S.empleadoActivo.id, p, cant);
+  if(pedido && modsResumen.length){
+    await DB.guardarModificadoresPedido(pedido.id, modsResumen);
+    pedido.modificadores = modsResumen;
+  }
   await DB.actualizarMesa(S.mesaSel, { estado: 'ocupada', abierta_en: new Date().toISOString() });
   S.mesaPedidos = await DB.listarPedidosMesa(S.mesaSel);
   const m = S.mesas.find(x=>x.id===S.mesaSel); if(m) m.estado='ocupada';
   S.mesaAddView = false;
   S.mesaAddSel = null;
   S.mesaAddCant = 1;
+  S.mesaAddMods = {};
+  S.mesaAddGrupos = [];
   R();
 };
 
@@ -1262,9 +1318,45 @@ window.abrirNuevoProducto = function(){
   S.prodForm = { id:null, nombre:'', precio:'', costo:'', emoji:'📦', color:'#B5D4F4', foto_url:null, controla_stock:false, stock:'0', stock_minimo:'5', categoria_id: S.categorias[0]?.id||null };
   R();
 };
-window.abrirEditarProducto = function(pid){
+window.abrirEditarProducto = async function(pid){
   const p = S.productos.find(x=>x.id===pid);
   S.prodForm = { id:p.id, nombre:p.nombre, precio:String(p.precio), costo:p.precio_costo!=null?String(p.precio_costo):'', emoji:p.emoji||'📦', color:p.color||'#B5D4F4', foto_url:p.foto_url||null, controla_stock:p.controla_stock, stock:String(p.stock||0), stock_minimo:String(p.stock_minimo||5), categoria_id:p.categoria_id };
+  S.prodMods = await DB.listarModificadoresProducto(pid);
+  S.nuevoGrupoForm = false; S.ngRequerido = false; S.ngMultiple = false;
+  R();
+};
+
+window.crearGrupoMod = async function(productoId){
+  const nombre = document.getElementById('ng-nombre')?.value.trim();
+  if(!nombre){ alert('Ingresá el nombre del grupo.'); return; }
+  const { data } = await DB.crearGrupoModificador(S.negocio.id, productoId, nombre, S.ngRequerido||false, S.ngMultiple||false);
+  if(data){ data.modificador_opciones = []; S.prodMods = [...(S.prodMods||[]), data]; }
+  S.nuevoGrupoForm = false;
+  R();
+};
+
+window.eliminarGrupoMod = async function(grupoId){
+  if(!confirm('¿Eliminar este grupo y todas sus opciones?')) return;
+  await DB.eliminarGrupoModificador(grupoId);
+  S.prodMods = (S.prodMods||[]).filter(g=>g.id!==grupoId);
+  R();
+};
+
+window.agregarOpcionMod = async function(grupoId){
+  const input = document.getElementById('nueva-op-'+grupoId);
+  const nombre = input?.value.trim();
+  if(!nombre) return;
+  const { data } = await DB.crearOpcionModificador(S.negocio.id, grupoId, nombre);
+  if(data){
+    S.prodMods = (S.prodMods||[]).map(g=>g.id===grupoId?{...g,modificador_opciones:[...(g.modificador_opciones||[]),data]}:g);
+  }
+  if(input) input.value='';
+  R();
+};
+
+window.eliminarOpcionMod = async function(opcionId, grupoId){
+  await DB.eliminarOpcionModificador(opcionId);
+  S.prodMods = (S.prodMods||[]).map(g=>g.id===grupoId?{...g,modificador_opciones:(g.modificador_opciones||[]).filter(o=>o.id!==opcionId)}:g);
   R();
 };
 
@@ -1388,6 +1480,41 @@ function renderProductoForm(back){
         <div><label class="lbl">Alerta mínima</label><input id="pf-min" type="text" inputmode="numeric" value="${f.stock_minimo}" oninput="S.prodForm.stock_minimo=this.value" placeholder="5"></div>
       </div>`:''}
       <button class="btn-primary" style="margin-top:10px" onclick="guardarProducto()">${isEdit?'Guardar cambios':'Agregar artículo'}</button>
+
+      ${isEdit ? `<div style="margin-top:18px;border-top:1px solid var(--ink-100);padding-top:14px">
+        <div style="font-size:13px;font-weight:800;color:var(--ink-700);margin-bottom:4px">Modificadores</div>
+        <div style="font-size:12px;color:var(--ink-500);margin-bottom:12px">Opciones que el mozo elige al pedir este producto (sin costo extra). Ej: tipo de leche, azúcar.</div>
+        ${(S.prodMods||[]).map(g=>`
+          <div class="card" style="padding:12px 14px;margin-bottom:9px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+              <div style="display:flex;align-items:center;gap:7px">
+                <span style="font-size:14px;font-weight:700">${g.nombre}</span>
+                ${g.requerido?'<span style="font-size:10px;font-weight:700;color:var(--danger);background:var(--danger-soft);padding:2px 7px;border-radius:99px">obligatorio</span>':''}
+                ${g.multiple?'<span style="font-size:10px;font-weight:700;color:var(--brand);background:var(--brand-soft);padding:2px 7px;border-radius:99px">múltiple</span>':''}
+              </div>
+              <button onclick="eliminarGrupoMod('${g.id}')" style="background:none;border:none;color:var(--danger);font-size:16px"><i class="ti ti-trash"></i></button>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
+              ${(g.modificador_opciones||[]).map(o=>`<div style="display:flex;align-items:center;gap:4px;background:var(--ink-100);border-radius:99px;padding:4px 10px 4px 12px;font-size:12px;font-weight:600">${o.nombre}<button onclick="eliminarOpcionMod('${o.id}','${g.id}')" style="background:none;border:none;color:var(--ink-400);font-size:12px;padding:0 0 0 4px"><i class="ti ti-x"></i></button></div>`).join('')}
+            </div>
+            <div style="display:flex;gap:7px">
+              <input id="nueva-op-${g.id}" placeholder="Nueva opción..." style="flex:1;padding:8px 10px;font-size:13px">
+              <button onclick="agregarOpcionMod('${g.id}')" style="padding:8px 14px;background:var(--brand);color:#fff;border:none;border-radius:var(--r-sm);font-size:14px;font-weight:700">+</button>
+            </div>
+          </div>`).join('')}
+        <button onclick="S.nuevoGrupoForm=true;S.ngRequerido=false;S.ngMultiple=false;R()" style="width:100%;padding:11px;border:1.5px dashed var(--ink-300);background:none;border-radius:var(--r-md);font-size:13px;font-weight:700;color:var(--ink-500)"><i class="ti ti-plus"></i> Agregar grupo de opciones</button>
+        ${S.nuevoGrupoForm?`<div class="card" style="padding:14px;margin-top:10px">
+          <div class="field"><label class="lbl">Nombre del grupo *</label><input id="ng-nombre" placeholder="Ej: Tipo de leche"></div>
+          <div style="display:flex;gap:10px;margin-bottom:12px">
+            <div onclick="S.ngRequerido=!S.ngRequerido;R()" style="flex:1;padding:10px;border-radius:var(--r-sm);border:2px solid ${S.ngRequerido?'var(--danger)':'var(--ink-100)'};background:${S.ngRequerido?'var(--danger-soft)':'#fff'};text-align:center;cursor:pointer;font-size:12px;font-weight:700;color:${S.ngRequerido?'var(--danger)':'var(--ink-500)'}"><i class="ti ti-asterisk" style="font-size:11px"></i> Obligatorio</div>
+            <div onclick="S.ngMultiple=!S.ngMultiple;R()" style="flex:1;padding:10px;border-radius:var(--r-sm);border:2px solid ${S.ngMultiple?A:'var(--ink-100)'};background:${S.ngMultiple?'var(--brand-soft)':'#fff'};text-align:center;cursor:pointer;font-size:12px;font-weight:700;color:${S.ngMultiple?A:'var(--ink-500)'}"><i class="ti ti-checks" style="font-size:11px"></i> Múltiple</div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn-primary" style="flex:1;padding:12px" onclick="crearGrupoMod('${f.id}')">Crear</button>
+            <button onclick="S.nuevoGrupoForm=false;R()" style="padding:12px 16px;background:var(--ink-100);border:none;border-radius:var(--r-md);font-size:14px;font-weight:700">×</button>
+          </div>
+        </div>`:''}
+      </div>` : ''}
     </div>
   </div>`;
 }
@@ -2087,6 +2214,7 @@ function renderCocinaContent(){
             <div style="width:32px;height:32px;border-radius:9px;background:#252839;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:${item.estado==='cocina'?'var(--warn)':'#fff'}">${item.cantidad}×</div>
             <div style="flex:1">
               <div style="font-size:14px;font-weight:700;line-height:1.3">${item.nombre_producto}</div>
+              ${(item.modificadores||[]).length?`<div style="font-size:12px;color:#f0a500;font-weight:600;margin-top:3px">${(item.modificadores||[]).map(m=>m.grupo+': '+m.opciones.join(', ')).join(' · ')}</div>`:''}
               ${item.nota?`<div style="font-size:11px;color:var(--warn);font-weight:600;margin-top:2px">⚠ ${item.nota}</div>`:''}
             </div>
             <div style="width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:${item.estado==='listo'?'#1a3a28':item.estado==='cocina'?'#3a2a10':'#252839'};color:${item.estado==='listo'?MONEY:item.estado==='cocina'?'var(--warn)':'var(--ink-500)'}">
