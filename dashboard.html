@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nativ POS — Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+<style>
+:root{
+  --brand:#1a3fa0;--brand-deep:#0d2570;--brand-soft:#eaeefb;
+  --money:#0f9d58;--money-soft:#e6f7ee;--money-deep:#0a7a43;
+  --danger:#e0293f;--danger-soft:#fdeaed;
+  --warn:#d97a06;--warn-soft:#fef3e2;
+  --ink-900:#14171f;--ink-700:#4b5160;--ink-500:#969cab;--ink-300:#d6d9e1;--ink-100:#f2f3f6;--ink-0:#fff;
+  --sidebar:240px;
+  --r:10px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--ink-100);color:var(--ink-900);-webkit-font-smoothing:antialiased;min-height:100vh;display:flex}
+
+/* SIDEBAR */
+.sidebar{width:var(--sidebar);background:var(--brand-deep);min-height:100vh;display:flex;flex-direction:column;position:fixed;top:0;left:0;z-index:10}
+.sidebar-logo{padding:24px 20px 20px;display:flex;align-items:center;gap:12px;border-bottom:1px solid rgba(255,255,255,.1)}
+.sidebar-logo svg{flex-shrink:0}
+.sidebar-logo-text{font-size:15px;font-weight:800;color:#fff;line-height:1.2}
+.sidebar-logo-sub{font-size:11px;color:rgba(255,255,255,.5)}
+.nav{padding:16px 12px;flex:1}
+.nav-label{font-size:10px;font-weight:700;color:rgba(255,255,255,.35);text-transform:uppercase;letter-spacing:.8px;padding:0 8px;margin:16px 0 6px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;color:rgba(255,255,255,.65);font-size:13px;font-weight:600;cursor:pointer;text-decoration:none;transition:background .12s}
+.nav-item:hover{background:rgba(255,255,255,.08);color:#fff}
+.nav-item.active{background:rgba(255,255,255,.15);color:#fff}
+.nav-item i{font-size:17px;width:20px}
+.sidebar-footer{padding:16px 12px;border-top:1px solid rgba(255,255,255,.1)}
+.sidebar-user{display:flex;align-items:center;gap:10px;padding:8px;border-radius:8px}
+.sidebar-avatar{width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#fff;flex-shrink:0}
+
+/* MAIN */
+.main{margin-left:var(--sidebar);flex:1;display:flex;flex-direction:column;min-height:100vh}
+.topbar{background:#fff;border-bottom:1px solid var(--ink-100);padding:0 28px;height:60px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:5}
+.topbar-title{font-size:17px;font-weight:800;flex:1}
+.content{padding:24px 28px;flex:1}
+
+/* FILTROS */
+.filters{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:24px}
+.filter-btn{padding:8px 14px;border-radius:8px;font-size:13px;font-weight:700;border:1.5px solid var(--ink-300);background:#fff;color:var(--ink-700);cursor:pointer;transition:all .12s}
+.filter-btn.active{background:var(--brand);border-color:var(--brand);color:#fff}
+.filter-sep{width:1px;height:20px;background:var(--ink-300)}
+select.filter-select{padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;border:1.5px solid var(--ink-300);background:#fff;color:var(--ink-700);cursor:pointer}
+input.filter-date{padding:8px 12px;border-radius:8px;font-size:13px;border:1.5px solid var(--ink-300);background:#fff;color:var(--ink-900)}
+.btn-export{padding:8px 16px;background:var(--brand);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px;margin-left:auto}
+.btn-export:hover{background:var(--brand-deep)}
+
+/* KPIs */
+.kpi-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:24px}
+.kpi{background:#fff;border-radius:var(--r);padding:18px 20px;border:1px solid var(--ink-100)}
+.kpi-label{font-size:12px;color:var(--ink-500);font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.kpi-value{font-size:26px;font-weight:800;line-height:1}
+.kpi-sub{font-size:11px;color:var(--ink-500);margin-top:5px}
+.kpi-badge{display:inline-flex;align-items:center;gap:3px;font-size:11px;font-weight:700;padding:2px 7px;border-radius:99px;margin-top:5px}
+
+/* CHARTS */
+.charts-grid{display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:20px}
+.charts-grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:20px}
+.card{background:#fff;border-radius:var(--r);border:1px solid var(--ink-100);overflow:hidden}
+.card-header{padding:16px 20px 0;display:flex;align-items:center;justify-content:space-between}
+.card-title{font-size:14px;font-weight:800;color:var(--ink-900)}
+.card-body{padding:16px 20px}
+canvas{max-height:260px}
+
+/* TABLA */
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+th{font-size:12px;font-weight:700;color:var(--ink-500);text-transform:uppercase;letter-spacing:.4px;padding:10px 14px;text-align:left;border-bottom:1px solid var(--ink-100);white-space:nowrap}
+td{padding:11px 14px;font-size:13px;color:var(--ink-700);border-bottom:1px solid var(--ink-100)}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--ink-100)}
+.td-right{text-align:right;font-weight:700}
+.td-mono{font-family:monospace;font-size:12px}
+.badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700}
+.badge-green{background:var(--money-soft);color:var(--money-deep)}
+.badge-blue{background:var(--brand-soft);color:var(--brand)}
+.badge-warn{background:var(--warn-soft);color:var(--warn)}
+.badge-red{background:var(--danger-soft);color:var(--danger)}
+
+/* UTILS */
+.section-title{font-size:15px;font-weight:800;margin-bottom:12px;margin-top:4px}
+.empty-state{text-align:center;padding:40px;color:var(--ink-500)}
+.empty-state i{font-size:42px;display:block;margin-bottom:10px;color:var(--ink-300)}
+.spinner-wrap{display:flex;align-items:center;justify-content:center;padding:60px}
+.spinner{width:24px;height:24px;border:3px solid rgba(26,63,160,.15);border-top-color:var(--brand);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.text-money{color:var(--money-deep);font-weight:700}
+.text-danger{color:var(--danger);font-weight:700}
+.text-brand{color:var(--brand);font-weight:700}
+
+@media(max-width:1100px){
+  .kpi-grid{grid-template-columns:repeat(3,1fr)}
+  .charts-grid{grid-template-columns:1fr}
+  .charts-grid-3{grid-template-columns:1fr 1fr}
+}
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<nav class="sidebar">
+  <div class="sidebar-logo">
+    <svg width="32" height="32" viewBox="0 0 100 100"><rect width="100" height="100" rx="20" fill="#fff" fill-opacity=".15"/><polygon points="18,80 18,20 30,20 58,56 58,20 72,20 72,80 58,80 30,44 30,80" fill="white"/><polygon points="18,20 30,20 44,42 30,42" fill="#e0293f"/></svg>
+    <div>
+      <div class="sidebar-logo-text" id="sb-negocio">Nativ POS</div>
+      <div class="sidebar-logo-sub">Dashboard</div>
+    </div>
+  </div>
+  <div class="nav">
+    <div class="nav-label">Reportes</div>
+    <a class="nav-item active" onclick="showSection('ventas')"><i class="ti ti-chart-bar"></i>Ventas</a>
+    <a class="nav-item" onclick="showSection('productos')"><i class="ti ti-package"></i>Productos</a>
+    <a class="nav-item" onclick="showSection('clientes')"><i class="ti ti-users"></i>Clientes</a>
+    <div class="nav-label">Finanzas</div>
+    <a class="nav-item" onclick="showSection('finanzas')"><i class="ti ti-chart-line"></i>Resumen</a>
+    <div class="nav-label">Operaciones</div>
+    <a class="nav-item" href="./index.html"><i class="ti ti-device-mobile"></i>Ir al POS</a>
+  </div>
+  <div class="sidebar-footer">
+    <div class="sidebar-user">
+      <div class="sidebar-avatar" id="sb-avatar">D</div>
+      <div>
+        <div style="font-size:12px;font-weight:700;color:#fff" id="sb-dueno">Cargando...</div>
+        <div style="font-size:11px;color:rgba(255,255,255,.4)">Dueño</div>
+      </div>
+    </div>
+  </div>
+</nav>
+
+<!-- MAIN -->
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-title" id="section-title">Resumen de ventas</div>
+    <div id="topbar-right"></div>
+  </div>
+  <div class="content" id="content">
+    <div class="spinner-wrap"><div class="spinner"></div></div>
+  </div>
+</div>
+
+<script type="module">
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './src/supabase-config.js';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const f$ = n => '$' + (Math.round(n)||0).toLocaleString('es-AR');
+const fPct = n => (n||0).toFixed(1) + '%';
+
+let D = {
+  negocio: null,
+  ventas: [],
+  empleados: [],
+  productos: [],
+  clientes: [],
+  desde: null, hasta: null,
+  periodo: 'mes',
+  empFiltro: '',
+  section: 'ventas',
+};
+
+// ── BOOT ────────────────────────────────────────────────────
+async function boot(){
+  const { data: { user } } = await sb.auth.getUser();
+  if(!user){ window.location.href = './auth.html'; return; }
+
+  const { data: neg } = await sb.from('negocios').select('*').eq('owner_id', user.id).limit(1).single();
+  if(!neg){ window.location.href = './auth.html'; return; }
+  D.negocio = neg;
+
+  document.getElementById('sb-negocio').textContent = neg.nombre;
+  document.getElementById('sb-dueno').textContent = neg.nombre_dueno || 'Dueño';
+  document.getElementById('sb-avatar').textContent = (neg.nombre_dueno||'D').charAt(0).toUpperCase();
+
+  const [empleados, productos, clientes] = await Promise.all([
+    sb.from('empleados').select('id,nombre,rol').eq('negocio_id', neg.id).eq('activo', true),
+    sb.from('productos').select('*').eq('negocio_id', neg.id).eq('activo', true),
+    sb.from('clientes').select('*').eq('negocio_id', neg.id),
+  ]);
+  D.empleados = empleados.data || [];
+  D.productos = productos.data || [];
+  D.clientes = clientes.data || [];
+
+  // Llenar selector de empleados
+  const sel = document.getElementById('emp-select');
+  if(sel){
+    D.empleados.forEach(e => {
+      const opt = document.createElement('option');
+      opt.value = e.id; opt.textContent = e.nombre;
+      sel.appendChild(opt);
+    });
+  }
+
+  setPeriodo('mes');
+}
+
+// ── FECHAS ───────────────────────────────────────────────────
+function setPeriodo(p){
+  D.periodo = p;
+  const now = new Date();
+  if(p==='hoy'){ D.desde = new Date(now.getFullYear(),now.getMonth(),now.getDate()).toISOString(); D.hasta = null; }
+  else if(p==='semana'){ const d=new Date(now); d.setDate(d.getDate()-7); D.desde=d.toISOString(); D.hasta=null; }
+  else if(p==='mes'){ D.desde = new Date(now.getFullYear(),now.getMonth(),1).toISOString(); D.hasta=null; }
+  else if(p==='anio'){ D.desde = new Date(now.getFullYear(),0,1).toISOString(); D.hasta=null; }
+  else if(p==='custom'){
+    const fd = document.getElementById('f-desde')?.value;
+    const fh = document.getElementById('f-hasta')?.value;
+    D.desde = fd ? new Date(fd).toISOString() : null;
+    D.hasta = fh ? new Date(fh+'T23:59:59').toISOString() : null;
+  }
+  cargarVentas();
+}
+window.setPeriodo = setPeriodo;
+window.aplicarCustom = () => setPeriodo('custom');
+
+async function cargarVentas(){
+  document.getElementById('content').innerHTML = '<div class="spinner-wrap"><div class="spinner"></div></div>';
+  let q = sb.from('ventas').select('*, venta_items(*), empleados(nombre)').eq('negocio_id', D.negocio.id).order('ts', { ascending: true });
+  if(D.desde) q = q.gte('ts', D.desde);
+  if(D.hasta) q = q.lte('ts', D.hasta);
+  const { data } = await q;
+  D.ventas = (data || []).filter(v => !v.anulada);
+  renderSection(D.section);
+}
+
+// ── NAV ──────────────────────────────────────────────────────
+window.showSection = function(s){
+  D.section = s;
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  event?.target?.closest('.nav-item')?.classList.add('active');
+  const titles = {ventas:'Resumen de ventas',productos:'Productos más vendidos',clientes:'Clientes',finanzas:'Resumen financiero'};
+  document.getElementById('section-title').textContent = titles[s] || s;
+  renderSection(s);
+};
+
+function renderSection(s){
+  if(s==='ventas') renderVentas();
+  else if(s==='productos') renderProductos();
+  else if(s==='clientes') renderClientesSection();
+  else if(s==='finanzas') renderFinanzas();
+}
+
+// ── FILTROS HTML ─────────────────────────────────────────────
+function filtrosHTML(){
+  const periodos = [['hoy','Hoy'],['semana','Semana'],['mes','Mes'],['anio','Año'],['custom','Custom']];
+  return `<div class="filters">
+    ${periodos.map(([id,l])=>`<button class="filter-btn ${D.periodo===id?'active':''}" onclick="setPeriodo('${id}')">${l}</button>`).join('')}
+    ${D.periodo==='custom'?`<div class="filter-sep"></div><input type="date" class="filter-date" id="f-desde" value="${D.desde?.slice(0,10)||''}"><span style="color:var(--ink-500)">→</span><input type="date" class="filter-date" id="f-hasta" value="${D.hasta?.slice(0,10)||''}"><button class="filter-btn active" onclick="aplicarCustom()">Aplicar</button>`:''}
+    <div class="filter-sep"></div>
+    <select class="filter-select" id="emp-select" onchange="D.empFiltro=this.value;renderSection(D.section)">
+      <option value="">Todos los colaboradores</option>
+      ${D.empleados.map(e=>`<option value="${e.id}" ${D.empFiltro===e.id?'selected':''}>${e.nombre}</option>`).join('')}
+    </select>
+    <button class="btn-export" onclick="exportarCSV()"><i class="ti ti-download"></i> Exportar CSV</button>
+  </div>`;
+}
+
+function ventasFiltradas(){
+  let v = D.ventas;
+  if(D.empFiltro) v = v.filter(x => x.empleado_id === D.empFiltro);
+  return v;
+}
+
+// ── SECCIÓN VENTAS ───────────────────────────────────────────
+function renderVentas(){
+  const ventas = ventasFiltradas();
+  const total = ventas.reduce((a,v)=>a+v.total,0);
+  const cnt = ventas.length;
+  const prom = cnt ? Math.round(total/cnt) : 0;
+  const ivaPct = parseFloat(D.negocio.config?.impuesto_pct)||0;
+  const divisor = ivaPct ? (1+ivaPct/100) : 1;
+  const neto = Math.round(total/divisor);
+  const iva = total - neto;
+  const descuento = ventas.reduce((a,v)=>a+(v.descuento||0),0);
+
+  // Por método de pago
+  const porMetodo = {};
+  ventas.forEach(v=>{ porMetodo[v.metodo_pago]=(porMetodo[v.metodo_pago]||0)+v.total; });
+
+  // Por día (para gráfico)
+  const porDia = {};
+  ventas.forEach(v=>{ const d=v.ts.slice(0,10); porDia[d]=(porDia[d]||0)+v.total; });
+  const dias = Object.keys(porDia).sort();
+  const valsDia = dias.map(d=>porDia[d]);
+
+  // Por hora
+  const porHora = Array(24).fill(0);
+  ventas.forEach(v=>{ const h=new Date(v.ts).getHours(); porHora[h]+=v.total; });
+
+  // Labels métodos
+  const metLabels={efectivo:'Efectivo',transferencia:'Transferencia',tarjeta:'Tarjeta',ctacte:'Cta. corriente',usd:'USD',brl:'BRL'};
+  const metColors=['#1a3fa0','#0f9d58','#d97a06','#8b5cf6','#e0293f','#06b6d4'];
+
+  document.getElementById('content').innerHTML = `
+    ${filtrosHTML()}
+    <div class="kpi-grid">
+      <div class="kpi"><div class="kpi-label"><i class="ti ti-cash" style="color:var(--brand)"></i> Ventas brutas</div><div class="kpi-value text-brand">${f$(total)}</div><div class="kpi-sub">${cnt} ticket${cnt!==1?'s':''} · prom. ${f$(prom)}</div></div>
+      ${ivaPct?`<div class="kpi"><div class="kpi-label"><i class="ti ti-receipt-tax" style="color:var(--danger)"></i> IVA ${ivaPct}%</div><div class="kpi-value text-danger">${f$(iva)}</div><div class="kpi-sub">A remitir a AFIP</div></div>
+      <div class="kpi"><div class="kpi-label"><i class="ti ti-trending-up" style="color:var(--money)"></i> Ventas netas</div><div class="kpi-value text-money">${f$(neto)}</div><div class="kpi-sub">Sin IVA</div></div>`
+      :`<div class="kpi"><div class="kpi-label"><i class="ti ti-trending-up" style="color:var(--money)"></i> Ventas netas</div><div class="kpi-value text-money">${f$(total)}</div><div class="kpi-sub">Sin impuesto configurado</div></div>`}
+      <div class="kpi"><div class="kpi-label"><i class="ti ti-tag" style="color:var(--warn)"></i> Descuentos</div><div class="kpi-value" style="color:var(--warn)">${f$(descuento)}</div><div class="kpi-sub">${total?(fPct(descuento/total*100)):'-'} del bruto</div></div>
+      <div class="kpi"><div class="kpi-label"><i class="ti ti-receipt" style="color:var(--ink-500)"></i> Ticket promedio</div><div class="kpi-value">${f$(prom)}</div><div class="kpi-sub">${cnt} ventas totales</div></div>
+    </div>
+    <div class="charts-grid">
+      <div class="card">
+        <div class="card-header"><span class="card-title">Ventas por día</span></div>
+        <div class="card-body"><canvas id="chart-dias"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Por método de pago</span></div>
+        <div class="card-body">${Object.keys(porMetodo).length===0?'<div class="empty-state"><i class="ti ti-chart-pie"></i><p>Sin datos</p></div>':'<canvas id="chart-metodos"></canvas>'}</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="card-title">Horario pico</span></div>
+      <div class="card-body"><canvas id="chart-horas" style="max-height:140px"></canvas></div>
+    </div>
+    <div style="margin-top:20px" class="card">
+      <div class="card-header" style="padding-bottom:12px"><span class="card-title">Ventas del período</span><span style="font-size:12px;color:var(--ink-500)">${ventas.length} registros</span></div>
+      <div class="table-wrap">${tablaVentas(ventas)}</div>
+    </div>`;
+
+  // Gráfico días
+  if(dias.length){
+    new Chart(document.getElementById('chart-dias'), {
+      type:'bar',
+      data:{ labels: dias.map(d=>{ const [y,m,dd]=d.split('-'); return `${dd}/${m}`; }), datasets:[{ label:'Ventas', data:valsDia, backgroundColor:'#1a3fa0cc', borderRadius:6 }] },
+      options:{ responsive:true, plugins:{ legend:{display:false} }, scales:{ y:{ ticks:{ callback:v=>'$'+v.toLocaleString('es-AR') } } } }
+    });
+  }
+  // Gráfico métodos
+  if(Object.keys(porMetodo).length){
+    const keys = Object.keys(porMetodo);
+    new Chart(document.getElementById('chart-metodos'), {
+      type:'doughnut',
+      data:{ labels: keys.map(k=>metLabels[k]||k), datasets:[{ data: keys.map(k=>porMetodo[k]), backgroundColor: metColors.slice(0,keys.length), borderWidth:2, borderColor:'#fff' }] },
+      options:{ responsive:true, plugins:{ legend:{ position:'bottom', labels:{ font:{size:12} } } } }
+    });
+  }
+  // Gráfico horas
+  new Chart(document.getElementById('chart-horas'), {
+    type:'bar',
+    data:{ labels: Array.from({length:24},(_,i)=>`${i}h`), datasets:[{ label:'Ventas', data:porHora, backgroundColor: porHora.map(v=>v===Math.max(...porHora)?'#0f9d58':'#1a3fa055'), borderRadius:4 }] },
+    options:{ responsive:true, plugins:{legend:{display:false}}, scales:{ y:{ display:false }, x:{ ticks:{font:{size:11}} } } }
+  });
+}
+
+function tablaVentas(ventas){
+  if(!ventas.length) return '<div class="empty-state"><i class="ti ti-receipt"></i><p>Sin ventas en este período</p></div>';
+  const metLabels={efectivo:'Efectivo',transferencia:'Transf.',tarjeta:'Tarjeta',ctacte:'Cta.Cte.',usd:'USD',brl:'BRL'};
+  const metBadge={efectivo:'badge-blue',transferencia:'badge-green',tarjeta:'badge-warn',ctacte:'badge-warn',usd:'badge-green',brl:'badge-green'};
+  return `<table>
+    <thead><tr>
+      <th>Fecha y hora</th><th>Cajero</th><th>Artículos</th><th>Método</th><th class="td-right">Descuento</th><th class="td-right">Total</th>
+    </tr></thead>
+    <tbody>
+      ${[...ventas].reverse().slice(0,100).map(v=>{
+        const fecha = new Date(v.ts);
+        const items = (v.venta_items||[]).reduce((a,i)=>a+parseFloat(i.cantidad),0);
+        return `<tr>
+          <td class="td-mono">${fecha.toLocaleDateString('es-AR')} ${fecha.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</td>
+          <td>${v.empleados?.nombre||'—'}</td>
+          <td>${items} ítem${items!==1?'s':''}</td>
+          <td><span class="badge ${metBadge[v.metodo_pago]||'badge-blue'}">${metLabels[v.metodo_pago]||v.metodo_pago}</span></td>
+          <td class="td-right">${v.descuento>0?'−'+f$(v.descuento):'—'}</td>
+          <td class="td-right text-brand">${f$(v.total)}</td>
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table>`;
+}
+
+// ── SECCIÓN PRODUCTOS ────────────────────────────────────────
+function renderProductos(){
+  const ventas = ventasFiltradas();
+  const mapa = {};
+  ventas.forEach(v=>{
+    (v.venta_items||[]).forEach(it=>{
+      if(!mapa[it.producto_id]) mapa[it.producto_id]={ nombre:it.nombre_producto, cantidad:0, total:0 };
+      mapa[it.producto_id].cantidad += parseFloat(it.cantidad);
+      mapa[it.producto_id].total += it.precio_unitario * it.cantidad;
+    });
+  });
+  const ranking = Object.values(mapa).sort((a,b)=>b.total-a.total);
+  const totalGral = ranking.reduce((a,p)=>a+p.total,0);
+
+  // Por categoría
+  const porCat = {};
+  D.productos.forEach(p=>{
+    const cat = p.categoria_id || 'Sin categoría';
+    const item = mapa[p.id];
+    if(item){ if(!porCat[cat]) porCat[cat]={nombre:cat,total:0}; porCat[cat].total+=item.total; }
+  });
+
+  document.getElementById('content').innerHTML = `
+    ${filtrosHTML()}
+    <div class="charts-grid-3">
+      <div class="card" style="grid-column:1/3">
+        <div class="card-header"><span class="card-title">Productos más vendidos</span></div>
+        <div class="card-body"><canvas id="chart-prods"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Por categoría</span></div>
+        <div class="card-body">${Object.keys(porCat).length?'<canvas id="chart-cats"></canvas>':'<div class="empty-state" style="padding:20px"><i class="ti ti-tag"></i><p>Sin categorías</p></div>'}</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header" style="padding-bottom:12px"><span class="card-title">Ranking de productos</span></div>
+      <div class="table-wrap">
+        ${!ranking.length?'<div class="empty-state"><i class="ti ti-package"></i><p>Sin ventas en este período</p></div>':`<table>
+          <thead><tr><th>#</th><th>Producto</th><th class="td-right">Unidades</th><th class="td-right">Total</th><th class="td-right">% del total</th></tr></thead>
+          <tbody>${ranking.map((p,i)=>`<tr>
+            <td style="color:var(--ink-300);font-weight:700;width:30px">${i+1}</td>
+            <td style="font-weight:700">${p.nombre}</td>
+            <td class="td-right">${p.cantidad}</td>
+            <td class="td-right text-brand">${f$(p.total)}</td>
+            <td class="td-right"><div style="display:flex;align-items:center;gap:8px;justify-content:flex-end"><div style="width:80px;height:6px;border-radius:99px;background:var(--ink-100);overflow:hidden"><div style="height:100%;background:var(--brand);width:${totalGral?Math.round(p.total/totalGral*100):0}%"></div></div><span>${totalGral?Math.round(p.total/totalGral*100):0}%</span></div></td>
+          </tr>`).join('')}</tbody>
+        </table>`}
+      </div>
+    </div>`;
+
+  if(ranking.length){
+    new Chart(document.getElementById('chart-prods'),{
+      type:'bar',
+      data:{ labels:ranking.slice(0,10).map(p=>p.nombre.length>18?p.nombre.slice(0,18)+'…':p.nombre), datasets:[{label:'Total vendido',data:ranking.slice(0,10).map(p=>p.total),backgroundColor:'#1a3fa0cc',borderRadius:6}] },
+      options:{ indexAxis:'y', responsive:true, plugins:{legend:{display:false}}, scales:{ x:{ ticks:{ callback:v=>'$'+v.toLocaleString('es-AR') } } } }
+    });
+  }
+  if(Object.keys(porCat).length){
+    const cats = Object.values(porCat);
+    new Chart(document.getElementById('chart-cats'),{
+      type:'doughnut',
+      data:{ labels:cats.map(c=>c.nombre), datasets:[{data:cats.map(c=>c.total),backgroundColor:['#1a3fa0','#0f9d58','#d97a06','#8b5cf6','#e0293f'],borderWidth:2,borderColor:'#fff'}] },
+      options:{ responsive:true, plugins:{legend:{position:'bottom',labels:{font:{size:11}}}} }
+    });
+  }
+}
+
+// ── SECCIÓN CLIENTES ─────────────────────────────────────────
+function renderClientesSection(){
+  const ventas = ventasFiltradas();
+  const porCliente = {};
+  ventas.forEach(v=>{
+    if(v.cliente_id){
+      if(!porCliente[v.cliente_id]) porCliente[v.cliente_id]={ id:v.cliente_id, visitas:0, total:0 };
+      porCliente[v.cliente_id].visitas++;
+      porCliente[v.cliente_id].total+=v.total;
+    }
+  });
+  const ranking = Object.values(porCliente).map(c=>({
+    ...c, nombre: D.clientes.find(cl=>cl.id===c.id)?.nombre||'—'
+  })).sort((a,b)=>b.total-a.total);
+
+  document.getElementById('content').innerHTML = `
+    ${filtrosHTML()}
+    <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr)">
+      <div class="kpi"><div class="kpi-label"><i class="ti ti-users" style="color:var(--brand)"></i> Clientes únicos</div><div class="kpi-value text-brand">${D.clientes.length}</div><div class="kpi-sub">registrados</div></div>
+      <div class="kpi"><div class="kpi-label"><i class="ti ti-user-check" style="color:var(--money)"></i> Compraron en período</div><div class="kpi-value text-money">${ranking.length}</div><div class="kpi-sub">clientes activos</div></div>
+      <div class="kpi"><div class="kpi-label"><i class="ti ti-repeat" style="color:var(--warn)"></i> Ticket promedio</div><div class="kpi-value" style="color:var(--warn)">${f$(ranking.length?Math.round(ranking.reduce((a,c)=>a+c.total,0)/ranking.length):0)}</div><div class="kpi-sub">por cliente</div></div>
+    </div>
+    <div class="card">
+      <div class="card-header" style="padding-bottom:12px"><span class="card-title">Clientes por gasto</span></div>
+      <div class="table-wrap">
+        ${!ranking.length?'<div class="empty-state"><i class="ti ti-users"></i><p>Sin ventas a clientes en este período</p></div>':`<table>
+          <thead><tr><th>#</th><th>Cliente</th><th class="td-right">Visitas</th><th class="td-right">Total gastado</th><th class="td-right">Promedio/visita</th></tr></thead>
+          <tbody>${ranking.map((c,i)=>`<tr>
+            <td style="color:var(--ink-300);font-weight:700">${i+1}</td>
+            <td style="font-weight:700">${c.nombre}</td>
+            <td class="td-right">${c.visitas}</td>
+            <td class="td-right text-brand">${f$(c.total)}</td>
+            <td class="td-right">${f$(Math.round(c.total/c.visitas))}</td>
+          </tr>`).join('')}</tbody>
+        </table>`}
+      </div>
+    </div>`;
+}
+
+// ── SECCIÓN FINANZAS ─────────────────────────────────────────
+async function renderFinanzas(){
+  document.getElementById('content').innerHTML='<div class="spinner-wrap"><div class="spinner"></div></div>';
+  const negocioId = D.negocio.id;
+  const [fijos, vars] = await Promise.all([
+    sb.from('gastos_fijos').select('*').eq('negocio_id', negocioId),
+    sb.from('gastos_variables').select('*').eq('negocio_id', negocioId),
+  ]);
+  const gastosFijos = fijos.data||[];
+  const gastosVar = vars.data||[];
+
+  const ventas = ventasFiltradas();
+  const ivaPct = parseFloat(D.negocio.config?.impuesto_pct)||0;
+  const divisor = ivaPct?(1+ivaPct/100):1;
+  const totalBruto = ventas.reduce((a,v)=>a+v.total,0);
+  const totalNeto = Math.round(totalBruto/divisor);
+  const ivaTotal = totalBruto - totalNeto;
+  const totalFijos = gastosFijos.reduce((a,g)=>a+g.monto,0);
+  const totalVars = gastosVar.reduce((a,g)=>a+g.monto,0);
+
+  // Costo mercadería
+  const costoMap = {};
+  D.productos.forEach(p=>{ if(p.precio_costo!=null) costoMap[p.id]=p.precio_costo; });
+  let costoMerc = 0;
+  ventas.forEach(v=>(v.venta_items||[]).forEach(it=>{ if(costoMap[it.producto_id]) costoMerc+=costoMap[it.producto_id]*it.cantidad; }));
+
+  const ganancia = totalNeto - totalFijos - totalVars - costoMerc;
+  const margen = totalNeto?Math.round(ganancia/totalNeto*100):0;
+
+  // Gastos variables filtrados al período
+  const gastosVarPeriodo = gastosVar.filter(g=>{
+    if(!D.desde) return true;
+    return g.ts >= D.desde && (!D.hasta || g.ts <= D.hasta);
+  });
+  const totalVarsPeriodo = gastosVarPeriodo.reduce((a,g)=>a+g.monto,0);
+
+  document.getElementById('content').innerHTML = `
+    ${filtrosHTML()}
+    <div class="kpi-grid">
+      <div class="kpi"><div class="kpi-label"><i class="ti ti-trending-up" style="color:var(--brand)"></i> Ventas brutas</div><div class="kpi-value text-brand">${f$(totalBruto)}</div></div>
+      ${ivaPct?`<div class="kpi"><div class="kpi-label"><i class="ti ti-receipt-tax" style="color:var(--danger)"></i> IVA a AFIP</div><div class="kpi-value text-danger">−${f$(ivaTotal)}</div><div class="kpi-sub">${ivaPct}% incluido en precios</div></div>`:''}
+      <div class="kpi"><div class="kpi-label"><i class="ti ti-coin" style="color:var(--money)"></i> Ingreso neto</div><div class="kpi-value text-money">${f$(totalNeto)}</div></div>
+      <div class="kpi"><div class="kpi-label"><i class="ti ti-minus" style="color:var(--danger)"></i> Total gastos</div><div class="kpi-value text-danger">−${f$(totalFijos+totalVarsPeriodo+costoMerc)}</div></div>
+      <div class="kpi"><div class="kpi-label"><i class="ti ti-star" style="color:${margen>=20?'var(--money)':'var(--warn)'}"></i> Ganancia neta</div><div class="kpi-value" style="color:${ganancia>=0?'var(--money-deep)':'var(--danger)'}">${ganancia>=0?'+':''}${f$(ganancia)}</div><div class="kpi-sub">Margen: ${margen}%</div></div>
+    </div>
+    <div class="charts-grid">
+      <div class="card">
+        <div class="card-header"><span class="card-title">Desglose de costos</span></div>
+        <div class="card-body"><canvas id="chart-costos"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Gastos fijos</span></div>
+        <div class="card-body" style="padding:0">
+          ${!gastosFijos.length?'<div class="empty-state"><i class="ti ti-lock"></i><p>Sin gastos fijos</p></div>':
+          gastosFijos.map(g=>`<div style="display:flex;justify-content:space-between;padding:11px 16px;border-bottom:1px solid var(--ink-100)"><span style="font-size:13px">${g.nombre}</span><span style="font-size:13px;font-weight:700;color:var(--danger)">${f$(g.monto)}</span></div>`).join('')+
+          `<div style="display:flex;justify-content:space-between;padding:12px 16px;background:var(--ink-100)"><span style="font-size:13px;font-weight:700">Total</span><span style="font-size:14px;font-weight:800;color:var(--danger)">${f$(totalFijos)}</span></div>`}
+        </div>
+      </div>
+    </div>`;
+
+  const labels=['Costo mercadería','Gastos fijos','Gastos variables','Ganancia'];
+  const vals=[costoMerc, totalFijos, totalVarsPeriodo, Math.max(0,ganancia)];
+  const colors=['#8b5cf6','#e0293f','#d97a06','#0f9d58'];
+  new Chart(document.getElementById('chart-costos'),{
+    type:'doughnut',
+    data:{ labels, datasets:[{ data:vals, backgroundColor:colors, borderWidth:2, borderColor:'#fff' }] },
+    options:{ responsive:true, plugins:{ legend:{ position:'right', labels:{font:{size:12},padding:14} } } }
+  });
+}
+
+// ── EXPORT CSV ───────────────────────────────────────────────
+window.exportarCSV = function(){
+  const ventas = ventasFiltradas();
+  const metLabels={efectivo:'Efectivo',transferencia:'Transferencia',tarjeta:'Tarjeta',ctacte:'Cuenta corriente',usd:'USD',brl:'BRL'};
+  const rows = [['Fecha','Hora','Cajero','Artículos','Método','Descuento','Total']];
+  [...ventas].reverse().forEach(v=>{
+    const f = new Date(v.ts);
+    const items = (v.venta_items||[]).reduce((a,i)=>a+parseFloat(i.cantidad),0);
+    rows.push([
+      f.toLocaleDateString('es-AR'),
+      f.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}),
+      v.empleados?.nombre||'',
+      items,
+      metLabels[v.metodo_pago]||v.metodo_pago,
+      v.descuento||0,
+      v.total,
+    ]);
+  });
+  const csv = rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download=`nativ-ventas-${new Date().toISOString().slice(0,10)}.csv`; a.click();
+  URL.revokeObjectURL(url);
+};
+
+boot();
+</script>
+</body>
+</html>
