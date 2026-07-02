@@ -291,3 +291,49 @@ export async function eliminarGastoVariable(id){
   const { error } = await sb.from('gastos_variables').delete().eq('id', id);
   return { error };
 }
+
+// ── MODIFICADORES ───────────────────────────────────────────
+export async function listarModificadoresProducto(productoId){
+  const { data } = await sb.from('modificador_grupos')
+    .select('*, modificador_opciones(*)')
+    .eq('producto_id', productoId)
+    .order('orden');
+  return data || [];
+}
+
+export async function crearGrupoModificador(negocioId, productoId, nombre, requerido, multiple){
+  const { data, error } = await sb.from('modificador_grupos')
+    .insert({ negocio_id: negocioId, producto_id: productoId, nombre, requerido, multiple })
+    .select().single();
+  return { data, error };
+}
+
+export async function actualizarGrupoModificador(grupoId, campos){
+  const { data, error } = await sb.from('modificador_grupos')
+    .update(campos).eq('id', grupoId).select().single();
+  return { data, error };
+}
+
+export async function eliminarGrupoModificador(grupoId){
+  const { error } = await sb.from('modificador_grupos').delete().eq('id', grupoId);
+  return { error };
+}
+
+export async function crearOpcionModificador(negocioId, grupoId, nombre){
+  const { data, error } = await sb.from('modificador_opciones')
+    .insert({ negocio_id: negocioId, grupo_id: grupoId, nombre })
+    .select().single();
+  return { data, error };
+}
+
+export async function eliminarOpcionModificador(opcionId){
+  const { error } = await sb.from('modificador_opciones').delete().eq('id', opcionId);
+  return { error };
+}
+
+export async function guardarModificadoresPedido(pedidoId, modificadores){
+  const { error } = await sb.from('pedidos_mesa')
+    .update({ modificadores })
+    .eq('id', pedidoId);
+  return { error };
+}
