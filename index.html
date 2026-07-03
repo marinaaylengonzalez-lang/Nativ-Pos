@@ -525,19 +525,34 @@ function renderVender(){
     </div>
 
     ${S.sheet==='cart' ? sheetCart() : ''}
+    ${S.sheet==='cart-mod' ? sheetCartMod() : ''}
     ${S.sheet==='checkout' ? sheetCheckout() : ''}
     ${S.sheet==='success' ? sheetSuccess() : ''}
   </div>`;
 }
 
-window.addToCart = function(pid){
+window.addToCart = async function(pid){
   const p = S.productos.find(x=>x.id===pid);
   if(!p) return;
   const cur = S.cart[pid] || 0;
   if(p.controla_stock && p.stock - cur <= 0) return;
+
+  // Si el producto tiene modificadores, mostrar selector antes de agregar
+  const mods = await DB.listarModificadoresProducto(pid);
+  if(mods.length){
+    S.cartModSel = { pid, mods, cant: 1, opciones: {} };
+    S.sheet = 'cart-mod';
+    R();
+    return;
+  }
+
   S.cart = { ...S.cart, [pid]: cur + 1 };
   R();
 };
+window.eliminarDelCarrito = function(pid){
+  const c = {...S.cart}; delete c[pid]; S.cart = c; R();
+};
+
 window.adjCart = function(pid, delta){
   const p = S.productos.find(x=>x.id===pid);
   const cur = S.cart[pid] || 0;
@@ -556,6 +571,82 @@ function sheetBg(inner){
   </div>`;
 }
 
+function sheetCartMod(){
+  const sel = S.cartModSel;
+  if(!sel) return '';
+  const p = S.productos.find(x=>x.id===sel.pid);
+  const grupos = sel.mods || [];
+  const opciones = sel.opciones || {};
+  const faltanObligatorios = grupos.filter(g=>g.requerido && !(opciones[g.id]?.length));
+
+  return sheetBg(`
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+      <button onclick="S.sheet='cart';S.cartModSel=null;R()" style="width:34px;height:34px;background:var(--ink-100);border:none;border-radius:50%"><i class="ti ti-x"></i></button>
+      <div>
+        <div style="font-size:16px;font-weight:800">${p?.nombre}</div>
+        <div style="font-size:13px;color:var(--ink-500)">${f$(p?.precio)} · Personalizá tu pedido</div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:center;gap:20px;margin:12px 0 18px">
+      <button onclick="S.cartModSel.cant=Math.max(1,(S.cartModSel.cant||1)-1);R()" style="width:42px;height:42px;border-radius:50%;background:var(--ink-100);border:none;font-size:22px;font-weight:800">−</button>
+      <span style="font-size:28px;font-weight:800;min-width:44px;text-align:center">${sel.cant||1}</span>
+      <button onclick="S.cartModSel.cant=(S.cartModSel.cant||1)+1;R()" style="width:42px;height:42px;border-radius:50%;background:var(--ink-100);border:none;font-size:22px;font-weight:800">+</button>
+    </div>
+    ${grupos.map(g=>`
+      <div style="margin-bottom:14px">
+        <div style="font-size:13px;font-weight:700;color:var(--ink-700);margin-bottom:8px">${g.nombre}${g.requerido?'<span style="color:var(--danger);margin-left:4px">*</span>':''}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:7px">
+          ${(g.modificador_opciones||[]).map(o=>{
+            const sel2 = (opciones[g.id]||[]).includes(o.id);
+            return `<div onclick="toggleCartMod('${g.id}','${o.id}',${g.multiple})" style="padding:9px 16px;border-radius:99px;font-size:13px;font-weight:700;border:2px solid ${sel2?A:'var(--ink-200)'};background:${sel2?'var(--brand-soft)':'#fff'};color:${sel2?A:'var(--ink-700)'};cursor:pointer">${o.nombre}</div>`;
+          }).join('')}
+        </div>
+      </div>`).join('')}
+    <button class="btn-primary" onclick="confirmarCartMod()" ${faltanObligatorios.length?'disabled style="opacity:.5"':''}><i class="ti ti-check"></i> Agregar al ticket</button>
+  `);
+}
+
+window.toggleCartMod = function(grupoId, opcionId, multiple){
+  const opciones = S.cartModSel.opciones || {};
+  const actual = opciones[grupoId] || [];
+  S.cartModSel.opciones = {
+    ...opciones,
+    [grupoId]: multiple
+      ? (actual.includes(opcionId) ? actual.filter(x=>x!==opcionId) : [...actual, opcionId])
+      : (actual.includes(opcionId) ? [] : [opcionId])
+  };
+  R();
+};
+
+window.confirmarCartMod = async function(){
+  const sel = S.cartModSel;
+  if(!sel) return;
+  const p = S.productos.find(x=>x.id===sel.pid);
+  const cant = sel.cant || 1;
+  const grupos = sel.mods || [];
+  const opciones = sel.opciones || {};
+
+  // Guardar modificadores elegidos con la entrada del carrito
+  const modsResumen = grupos
+    .filter(g => opciones[g.id]?.length)
+    .map(g => ({
+      grupo: g.nombre,
+      opciones: (opciones[g.id]||[]).map(oid=>(g.modificador_opciones||[]).find(o=>o.id===oid)?.nombre).filter(Boolean)
+    }));
+
+  // Agregar al carrito con cantidad y notas
+  const cur = S.cart[sel.pid] || 0;
+  S.cart = { ...S.cart, [sel.pid]: cur + cant };
+
+  // Guardar los modificadores asociados a este producto en el carrito
+  if(!S.cartMods) S.cartMods = {};
+  S.cartMods[sel.pid] = modsResumen;
+
+  S.sheet = null;
+  S.cartModSel = null;
+  R();
+};
+
 function sheetCart(){
   const items = Object.entries(S.cart).filter(([,q])=>q>0);
   return sheetBg(`
@@ -567,13 +658,18 @@ function sheetCart(){
       const p = S.productos.find(x=>x.id===id); if(!p) return '';
       return `<div style="display:flex;align-items:center;gap:11px;padding:11px 0;border-bottom:1px solid var(--ink-100)">
         <div style="width:42px;height:42px;border-radius:12px;background:${p.color||'#eee'}33;display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden">${prodIcono(p,19)}</div>
-        <div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.nombre}</div><div style="font-size:12px;color:var(--ink-500);font-weight:600">${f$(p.precio)} c/u</div></div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.nombre}</div>
+          ${(S.cartMods?.[id]||[]).length?`<div style="font-size:11px;color:var(--brand);font-weight:600">${(S.cartMods[id]||[]).map(m=>m.opciones.join(', ')).join(' · ')}</div>`:''}
+          <div style="font-size:12px;color:var(--ink-500);font-weight:600">${f$(p.precio)} c/u</div>
+        </div>
         <div style="display:flex;align-items:center;gap:8px;background:var(--ink-100);border-radius:99px;padding:5px">
           <button onclick="adjCart('${id}',-1)" style="width:26px;height:26px;border-radius:50%;background:#fff;border:none;font-size:15px;font-weight:800;box-shadow:var(--shadow-card)">−</button>
           <span style="font-size:14px;font-weight:800;min-width:16px;text-align:center">${q}</span>
           <button onclick="adjCart('${id}',1)" style="width:26px;height:26px;border-radius:50%;background:#fff;border:none;font-size:15px;font-weight:800;box-shadow:var(--shadow-card)">+</button>
         </div>
-        <div style="font-size:15px;font-weight:800;min-width:62px;text-align:right">${f$(p.precio*q)}</div>
+        <div style="font-size:15px;font-weight:800;min-width:52px;text-align:right">${f$(p.precio*q)}</div>
+        <button onclick="eliminarDelCarrito('${id}')" style="background:none;border:none;color:var(--danger);font-size:18px;padding:4px"><i class="ti ti-trash"></i></button>
       </div>`;
     }).join('')}
     <div style="background:var(--ink-100);border-radius:var(--r-md);padding:14px 16px;margin:14px 0">
@@ -590,7 +686,7 @@ function sheetCart(){
       </div>
     </div>
     <button class="btn-money" onclick="S.sheet='checkout';S.cstep='metodo';R()">Cobrar ${f$(cartTotal())}</button>
-    <button class="btn-ghost" style="margin-top:8px" onclick="S.cart={};S.disc=0;S.sheet=null;R()">Vaciar ticket</button>
+    <button class="btn-ghost" style="margin-top:8px" onclick="S.cart={};S.disc=0;S.cartMods={};S.sheet=null;R()">Vaciar ticket</button>
   `);
 }
 
@@ -699,19 +795,53 @@ function itemsParaVenta(){
 }
 
 async function finalizarVenta(metodoPago, clienteId){
+  // Capturar datos antes de limpiar el carrito
+  const itemsVenta = itemsParaVenta();
+  const totalVenta = cartTotal();
+  const cantItems = Object.keys(S.cart).length;
+  const cartModsSnap = {...(S.cartMods||{})};
+  const cartSnap = {...S.cart};
+
   const { data, error } = await DB.registrarVenta({
     negocioId: S.negocio.id, empleadoId: S.empleadoActivo.id, turnoId: S.turno.id,
     clienteId: clienteId || null,
-    subtotal: cartSub(), descuento: discAmt(), total: cartTotal(),
+    subtotal: cartSub(), descuento: discAmt(), total: totalVenta,
     metodoPago, efectivoRecibido: metodoPago==='efectivo' ? (parseFloat(S.cash)||0) : null,
-    nota: S.nota || null, items: itemsParaVenta(),
+    nota: S.nota || null, items: itemsVenta,
   });
   if(error){ alert('Error al registrar venta: ' + error.message); return; }
 
+  // Mandar a cocina si hay productos con modificadores o si el negocio es restaurante
+  // Creamos un pedido de caja en pedidos_mesa con una "mesa virtual" de caja
+  const itemsConMods = Object.entries(cartSnap).filter(([pid]) => cartModsSnap[pid]?.length);
+  if(itemsConMods.length){
+    // Insertamos en pedidos_mesa como pedidos de "caja" sin mesa asignada
+    for(const [pid, cant] of itemsConMods){
+      const p = S.productos.find(x=>x.id===pid);
+      if(!p) continue;
+      const { data: pedido } = await DB.sb.from('pedidos_mesa').insert({
+        negocio_id: S.negocio.id,
+        mesa_id: null,
+        empleado_id: S.empleadoActivo.id,
+        producto_id: pid,
+        nombre_producto: p.nombre,
+        precio_unitario: p.precio,
+        cantidad: cant,
+        estado: 'pendiente',
+        modificadores: cartModsSnap[pid] || [],
+        es_caja: true,
+      }).select().single();
+      if(pedido) {
+        // Auto-marcar como en cocina para que aparezca inmediatamente
+        await DB.sb.from('pedidos_mesa').update({ estado: 'cocina' }).eq('id', pedido.id);
+      }
+    }
+  }
+
   // Refrescar productos (por el stock descontado)
   S.productos = await DB.listarProductos(S.negocio.id);
-  S.lastSale = { total: cartTotal(), items: Object.keys(S.cart).length };
-  S.cart = {}; S.disc = 0; S.nota=''; S.cash=''; S.selCliente=null;
+  S.lastSale = { total: totalVenta, items: cantItems };
+  S.cart = {}; S.disc = 0; S.nota=''; S.cash=''; S.selCliente=null; S.cartMods={};
   S.sheet = 'success'; S.cstep='metodo';
   R();
 }
@@ -2193,8 +2323,8 @@ function renderCocinaContent(){
   cocinaPedidos.forEach(p => {
     const nombre = p.mesas?.nombre || 'Mesa ?';
     if(!mesasMap[p.mesa_id]) mesasMap[p.mesa_id] = { nombre, items: [], ts: p.creado_en };
-    mesasMap[p.mesa_id].items.push(p);
-    if(p.creado_en < mesasMap[p.mesa_id].ts) mesasMap[p.mesa_id].ts = p.creado_en;
+    mesasMap[key].items.push(p);
+    if(p.creado_en < mesasMap[key].ts) mesasMap[key].ts = p.creado_en;
   });
 
   return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px">
